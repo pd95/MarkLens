@@ -7,10 +7,14 @@ import WebKit
 import AppKit
 typealias PlatformViewRepresentable = NSViewRepresentable
 typealias PlatformView = NSView
+typealias PlatformImage = NSImage
+typealias PlatformImageView = NSImageView
 #else
 import UIKit
 typealias PlatformViewRepresentable = UIViewRepresentable
 typealias PlatformView = UIView
+typealias PlatformImage = UIImage
+typealias PlatformImageView = UIImageView
 #endif
 
 struct MarkdownWebView: PlatformViewRepresentable {
@@ -158,6 +162,7 @@ struct MarkdownWebView: PlatformViewRepresentable {
         view.configuration.userContentController.removeScriptMessageHandler(forName: Self.scrollMessageHandler)
         coordinator.searchGeneration += 1
         coordinator.cancelOutput()
+        coordinator.removeReloadSnapshot()
         coordinator.webView = nil
     }
 
@@ -221,6 +226,8 @@ struct MarkdownWebView: PlatformViewRepresentable {
         var pendingOutputRequest: RenderedDocumentOutputRequest?
         var activeOutputRequest: RenderedDocumentOutputRequest?
         var latestScrollRequest = 0
+        weak var reloadSnapshotView: PlatformImageView?
+        var reloadGeneration = 0
 
         init(parent: MarkdownWebView) {
             self.parent = parent
@@ -249,7 +256,7 @@ struct MarkdownWebView: PlatformViewRepresentable {
                 isPageReady = false
                 isSearchInstalled = false
                 searchGeneration += 1
-                webView?.loadHTMLString(parent.html, baseURL: parent.baseURL)
+                reloadPage(animated: scrollChanged)
                 latestHash = newHash
             } else if isPageReady {
                 if customCSSChanged {
@@ -315,8 +322,11 @@ struct MarkdownWebView: PlatformViewRepresentable {
             }
         }
 
-        private func restoreScrollPosition() {
-            guard let webView else { return }
+        private func restoreScrollPosition(completion: (() -> Void)? = nil) {
+            guard let webView else {
+                completion?()
+                return
+            }
             latestScrollRequest = parent.scrollRequest
             let arguments: [String: Any] = [
                 "line": parent.scrollTarget.sourceLine.map { $0 as Any } ?? NSNull(),
@@ -328,8 +338,102 @@ struct MarkdownWebView: PlatformViewRepresentable {
                 "offset": parent.scrollTarget.viewportOffset
             ]
             guard let data = try? JSONSerialization.data(withJSONObject: arguments),
-                  let json = String(data: data, encoding: .utf8) else { return }
-            webView.evaluateJavaScript("window.MarkLensScroll.restore(\(json));")
+                  let json = String(data: data, encoding: .utf8) else {
+                completion?()
+                return
+            }
+            webView.evaluateJavaScript("window.MarkLensScroll.restore(\(json));") { _, _ in
+                completion?()
+            }
+        }
+
+        private func reloadPage(animated: Bool) {
+            guard let webView else { return }
+            reloadGeneration += 1
+            let generation = reloadGeneration
+            removeReloadSnapshot()
+            let html = parent.html
+            let baseURL = parent.baseURL
+            guard animated, reloadAnimationsEnabled else {
+                webView.loadHTMLString(html, baseURL: baseURL)
+                return
+            }
+
+            webView.takeSnapshot(with: nil) { [weak self, weak webView] image, _ in
+                guard let self,
+                      let webView,
+                      self.webView === webView,
+                      self.reloadGeneration == generation else { return }
+                if let image {
+                    self.installReloadSnapshot(image, over: webView)
+                }
+                webView.loadHTMLString(html, baseURL: baseURL)
+            }
+        }
+
+        private var reloadAnimationsEnabled: Bool {
+#if os(macOS)
+            NSWorkspace.shared.accessibilityDisplayShouldReduceMotion == false
+#else
+            UIAccessibility.isReduceMotionEnabled == false
+#endif
+        }
+
+        private func installReloadSnapshot(_ image: PlatformImage, over webView: WKWebView) {
+            removeReloadSnapshot()
+            let snapshotView = PlatformImageView(frame: webView.bounds)
+#if os(macOS)
+            snapshotView.image = image
+            snapshotView.imageScaling = .scaleAxesIndependently
+            snapshotView.autoresizingMask = [.width, .height]
+            snapshotView.setAccessibilityElement(false)
+#else
+            snapshotView.image = image
+            snapshotView.contentMode = .scaleToFill
+            snapshotView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+            snapshotView.isUserInteractionEnabled = false
+            snapshotView.isAccessibilityElement = false
+#endif
+            webView.addSubview(snapshotView)
+            reloadSnapshotView = snapshotView
+        }
+
+        private func finishReloadTransition() {
+            guard let snapshotView = reloadSnapshotView else { return }
+            if reloadAnimationsEnabled == false {
+                removeReloadSnapshot()
+                return
+            }
+#if os(macOS)
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = 0.2
+                context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+                snapshotView.animator().alphaValue = 0
+            } completionHandler: { [weak self, weak snapshotView] in
+                snapshotView?.removeFromSuperview()
+                if self?.reloadSnapshotView === snapshotView {
+                    self?.reloadSnapshotView = nil
+                }
+            }
+#else
+            UIView.animate(
+                withDuration: 0.2,
+                delay: 0,
+                options: [.beginFromCurrentState, .curveEaseInOut]
+            ) {
+                snapshotView.alpha = 0
+            } completion: { [weak self, weak snapshotView] _ in
+                snapshotView?.removeFromSuperview()
+                if self?.reloadSnapshotView === snapshotView {
+                    self?.reloadSnapshotView = nil
+                }
+            }
+#endif
+        }
+
+        fileprivate func removeReloadSnapshot() {
+            reloadSnapshotView?.removeFromSuperview()
+            reloadSnapshotView = nil
         }
 
         func localImagePermissionDenied(_ url: URL) {
@@ -709,7 +813,11 @@ struct MarkdownWebView: PlatformViewRepresentable {
                 let shouldRestoreScroll = self.parent.scrollRequest != self.latestScrollRequest
                 self.updateSearch(command: "search") {
                     if shouldRestoreScroll {
-                        self.restoreScrollPosition()
+                        self.restoreScrollPosition {
+                            self.finishReloadTransition()
+                        }
+                    } else {
+                        self.finishReloadTransition()
                     }
                 }
                 self.latestFindTerm = self.parent.findTerm
@@ -728,6 +836,7 @@ struct MarkdownWebView: PlatformViewRepresentable {
             withError error: Error
         ) {
             isPageReady = false
+            removeReloadSnapshot()
             failPendingOutput()
         }
 
@@ -737,6 +846,7 @@ struct MarkdownWebView: PlatformViewRepresentable {
             withError error: Error
         ) {
             isPageReady = false
+            removeReloadSnapshot()
             failPendingOutput()
         }
     }

@@ -22,6 +22,14 @@ final class MarkLensUITests: XCTestCase {
     }
 
     @MainActor
+    func testExternalRefreshPreservesPreviewPosition() throws {
+        let preview = XCUIApplication().openDocument(named: "sample", fileExtension: "md")
+        defer { preview.terminate() }
+
+        try preview.verifyExternalRefreshPreservesPreviewPosition()
+    }
+
+    @MainActor
     func testCreatesStarterDocument() throws {
         let preview = XCUIApplication().openDocument(named: "sample", fileExtension: "md")
         defer { preview.terminate() }
@@ -137,6 +145,7 @@ private extension XCUIApplication {
         return previewHandle(
             documentTitle: "\(baseName).\(fileExtension)",
             exportDirectoryURL: exportDirectory,
+            documentURL: temporaryDocumentURL,
             file: file,
             line: line
         )
@@ -146,6 +155,7 @@ private extension XCUIApplication {
     func previewHandle(
         documentTitle: String,
         exportDirectoryURL: URL? = nil,
+        documentURL: URL? = nil,
         file: StaticString = #file,
         line: UInt = #line
     ) -> MarkLensAppHandle {
@@ -175,7 +185,8 @@ private extension XCUIApplication {
             app: self,
             window: window,
             contentView: contentView,
-            exportDirectoryURL: exportDirectoryURL
+            exportDirectoryURL: exportDirectoryURL,
+            documentURL: documentURL
         )
     }
 }
@@ -198,6 +209,7 @@ private struct MarkLensAppHandle {
     let window: XCUIElement
     let contentView: XCUIElement
     let exportDirectoryURL: URL?
+    let documentURL: URL?
 
     var findField: XCUIElement {
         app.textFields["previewFindField"].firstMatch
@@ -258,6 +270,78 @@ private struct MarkLensAppHandle {
             (sourceEditor.value as? String)?.contains("# Welcome to MarkLens") == true,
             "Expected File → New to use the Markdown starter."
         )
+    }
+
+    func verifyExternalRefreshPreservesPreviewPosition() throws {
+        let documentURL = try XCTUnwrap(documentURL)
+        let target = app.staticTexts["Fenced math"].firstMatch
+
+        openFind()
+        search("math")
+        for _ in 0..<12 where target.isHittable == false {
+            submitSearch()
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        }
+        XCTAssertTrue(
+            waitUntilHittable(target),
+            "Expected preview search to reveal the middle document section."
+        )
+        let originalY = target.frame.minY
+
+        let insertedSections = (1...20).map { index in
+            "## External Update \(index)\n\nInserted content above the reading position."
+        }.joined(separator: "\n\n")
+        let originalText = try String(contentsOf: documentURL, encoding: .utf8)
+        let updatedText = originalText.replacingOccurrences(
+            of: "# Main markdown\n",
+            with: "# Main markdown\n\n\(insertedSections)\n"
+        )
+        XCTAssertNotEqual(updatedText, originalText)
+        try updatedText.write(to: documentURL, atomically: true, encoding: .utf8)
+
+        let refreshedHeading = app.staticTexts["External Update 20"].firstMatch
+        XCTAssertTrue(
+            refreshedHeading.waitForExistence(timeout: 5),
+            "Expected MarkLens to render the externally updated file."
+        )
+        XCTAssertTrue(
+            waitUntilHittable(target),
+            "Expected the section being read to remain visible after refresh."
+        )
+        XCTAssertEqual(
+            target.frame.minY,
+            originalY,
+            accuracy: 80,
+            "Expected external refresh to preserve the section's viewport position."
+        )
+        XCTAssertTrue(
+            remainsStable(target, near: originalY),
+            "Expected active Find reconstruction not to override the restored position."
+        )
+    }
+
+    private func waitUntilHittable(_ element: XCUIElement, timeout: TimeInterval = 5) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while element.isHittable == false, Date() < deadline {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+        }
+        return element.isHittable
+    }
+
+    private func remainsStable(
+        _ element: XCUIElement,
+        near expectedY: CGFloat,
+        accuracy: CGFloat = 80,
+        duration: TimeInterval = 1
+    ) -> Bool {
+        let deadline = Date().addingTimeInterval(duration)
+        while Date() < deadline {
+            guard element.isHittable, abs(element.frame.minY - expectedY) <= accuracy else {
+                return false
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+        }
+        return true
     }
 
     func search(_ text: String) {

@@ -15,6 +15,11 @@ import AppKit
 struct DocumentScrollPosition: Equatable {
     var sourceLine: Int?
     var progress: Double
+    var anchorIdentity: String? = nil
+    var anchorOccurrence: Int? = nil
+    var previousAnchorIdentity: String? = nil
+    var nextAnchorIdentity: String? = nil
+    var viewportOffset: Double = 0
 
     static let top = DocumentScrollPosition(sourceLine: 1, progress: 0)
 }
@@ -817,6 +822,8 @@ struct ContentView: View {
             if isRawEditing {
                 pendingExternalText = text
             } else {
+                previewScrollTarget = previewScrollPosition
+                previewScrollRequest += 1
                 document.updateText(text)
             }
         }

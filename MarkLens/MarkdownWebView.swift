@@ -240,6 +240,10 @@ struct MarkdownWebView: PlatformViewRepresentable {
             let findAnchorChanged = parent.findAnchorRequest != latestFindAnchorRequest
             let customCSSChanged = parent.customCSS != latestCustomCSS
             let scrollChanged = parent.scrollRequest != latestScrollRequest
+            let restoreAfterSearch: (() -> Void)? = scrollChanged ? { [weak self] in
+                self?.restoreScrollPosition()
+            } : nil
+            var searchUpdateScheduled = false
 
             if isPageReady && markdownChanged {
                 isPageReady = false
@@ -256,19 +260,26 @@ struct MarkdownWebView: PlatformViewRepresentable {
                     if findChanged {
                         updateSearch(
                             command: findTermChanged ? "search" : searchCommand(),
-                            includeSelection: true
+                            includeSelection: true,
+                            completion: restoreAfterSearch
                         )
+                        searchUpdateScheduled = true
                         latestFindTerm = parent.findTerm
                         latestFindRequest = parent.findRequest
                     } else {
-                        updateSearch(command: "anchor")
+                        updateSearch(command: "anchor", completion: restoreAfterSearch)
+                        searchUpdateScheduled = true
                     }
                 } else if findChanged {
-                    updateSearch(command: findTermChanged ? "search" : searchCommand())
+                    updateSearch(
+                        command: findTermChanged ? "search" : searchCommand(),
+                        completion: restoreAfterSearch
+                    )
+                    searchUpdateScheduled = true
                     latestFindTerm = parent.findTerm
                     latestFindRequest = parent.findRequest
                 }
-                if scrollChanged {
+                if scrollChanged && searchUpdateScheduled == false {
                     restoreScrollPosition()
                 }
             }
@@ -285,9 +296,19 @@ struct MarkdownWebView: PlatformViewRepresentable {
 
             let line = Self.optionalIntValue(value["line"])
             let progress = (value["progress"] as? NSNumber)?.doubleValue ?? 0
+            let anchorIdentity = value["anchor"] as? String
+            let anchorOccurrence = Self.optionalIntValue(value["occurrence"])
+            let previousAnchorIdentity = value["previousAnchor"] as? String
+            let nextAnchorIdentity = value["nextAnchor"] as? String
+            let viewportOffset = (value["offset"] as? NSNumber)?.doubleValue ?? 0
             let position = DocumentScrollPosition(
                 sourceLine: line,
-                progress: min(max(progress, 0), 1)
+                progress: min(max(progress, 0), 1),
+                anchorIdentity: anchorIdentity,
+                anchorOccurrence: anchorOccurrence,
+                previousAnchorIdentity: previousAnchorIdentity,
+                nextAnchorIdentity: nextAnchorIdentity,
+                viewportOffset: min(max(viewportOffset, -100_000), 100_000)
             )
             Task { @MainActor in
                 self.parent.scrollPosition = position
@@ -299,7 +320,12 @@ struct MarkdownWebView: PlatformViewRepresentable {
             latestScrollRequest = parent.scrollRequest
             let arguments: [String: Any] = [
                 "line": parent.scrollTarget.sourceLine.map { $0 as Any } ?? NSNull(),
-                "progress": parent.scrollTarget.progress
+                "progress": parent.scrollTarget.progress,
+                "anchor": parent.scrollTarget.anchorIdentity.map { $0 as Any } ?? NSNull(),
+                "occurrence": parent.scrollTarget.anchorOccurrence.map { $0 as Any } ?? NSNull(),
+                "previousAnchor": parent.scrollTarget.previousAnchorIdentity.map { $0 as Any } ?? NSNull(),
+                "nextAnchor": parent.scrollTarget.nextAnchorIdentity.map { $0 as Any } ?? NSNull(),
+                "offset": parent.scrollTarget.viewportOffset
             ]
             guard let data = try? JSONSerialization.data(withJSONObject: arguments),
                   let json = String(data: data, encoding: .utf8) else { return }
@@ -316,8 +342,15 @@ struct MarkdownWebView: PlatformViewRepresentable {
             parent.findBackwards ? "previous" : "next"
         }
 
-        private func updateSearch(command: String, includeSelection: Bool = false) {
-            guard let webView else { return }
+        private func updateSearch(
+            command: String,
+            includeSelection: Bool = false,
+            completion: (() -> Void)? = nil
+        ) {
+            guard let webView else {
+                completion?()
+                return
+            }
             searchGeneration += 1
             let generation = searchGeneration
 
@@ -326,7 +359,8 @@ struct MarkdownWebView: PlatformViewRepresentable {
                     command,
                     includeSelection: includeSelection,
                     generation: generation,
-                    in: webView
+                    in: webView,
+                    completion: completion
                 )
             }
         }
@@ -351,7 +385,8 @@ struct MarkdownWebView: PlatformViewRepresentable {
             _ command: String,
             includeSelection: Bool,
             generation: Int,
-            in webView: WKWebView
+            in webView: WKWebView,
+            completion: (() -> Void)? = nil
         ) {
             guard let jsonData = try? JSONSerialization.data(withJSONObject: [
                 "command": command,
@@ -359,6 +394,7 @@ struct MarkdownWebView: PlatformViewRepresentable {
                 "includeSelection": includeSelection
             ]),
                   let jsonString = String(data: jsonData, encoding: .utf8) else {
+                completion?()
                 return
             }
 
@@ -377,6 +413,7 @@ struct MarkdownWebView: PlatformViewRepresentable {
                         self.parent.findSelectionAction(selection)
                     }
                 }
+                completion?()
             }
         }
 
@@ -669,10 +706,12 @@ struct MarkdownWebView: PlatformViewRepresentable {
                 guard let self,
                       self.isPageReady,
                       generation == self.searchGeneration else { return }
-                if self.parent.scrollRequest != self.latestScrollRequest {
-                    self.restoreScrollPosition()
+                let shouldRestoreScroll = self.parent.scrollRequest != self.latestScrollRequest
+                self.updateSearch(command: "search") {
+                    if shouldRestoreScroll {
+                        self.restoreScrollPosition()
+                    }
                 }
-                self.updateSearch(command: "search")
                 self.latestFindTerm = self.parent.findTerm
                 self.latestFindRequest = self.parent.findRequest
 
@@ -706,18 +745,37 @@ struct MarkdownWebView: PlatformViewRepresentable {
     private static let resourceScheme = "marklens-resource"
     private static let scrollMessageHandler = "marklensScrollPosition"
 
-    private static let scrollPositionScript = """
+    static let scrollPositionScript = """
         (() => {
             const anchors = Array.from(
                 document.querySelectorAll('[data-marklens-source-line]')
             );
+            const identityForAnchor = element => {
+                const text = (element.textContent || '').replace(/\\s+/g, ' ').trim();
+                const value = `${element.tagName}:${text}`;
+                let hash = 2166136261;
+                for (let index = 0; index < value.length; index += 1) {
+                    hash ^= value.charCodeAt(index);
+                    hash = Math.imul(hash, 16777619);
+                }
+                return `${element.tagName}:${text.length}:${(hash >>> 0).toString(16)}`;
+            };
             const sourceAnchors = anchors
                 .map(element => ({
                     element,
-                    line: Number(element.dataset.marklensSourceLine)
+                    line: Number(element.dataset.marklensSourceLine),
+                    identity: identityForAnchor(element)
                 }))
                 .filter(anchor => Number.isFinite(anchor.line))
                 .sort((left, right) => left.line - right.line);
+            const anchorByElement = new WeakMap();
+            const occurrenceCounts = new Map();
+            sourceAnchors.forEach((anchor, index) => {
+                anchor.index = index;
+                anchor.occurrence = occurrenceCounts.get(anchor.identity) || 0;
+                occurrenceCounts.set(anchor.identity, anchor.occurrence + 1);
+                anchorByElement.set(anchor.element, anchor);
+            });
             const visibleAnchors = new Set();
             const progress = () => {
                 const maximum = Math.max(0, document.documentElement.scrollHeight - innerHeight);
@@ -725,19 +783,35 @@ struct MarkdownWebView: PlatformViewRepresentable {
             };
             const report = () => {
                 let line = null;
+                let anchor = null;
+                let occurrence = null;
+                let previousAnchor = null;
+                let nextAnchor = null;
+                let offset = 0;
                 let closestDistance = Infinity;
                 visibleAnchors.forEach(element => {
                     const rect = element.getBoundingClientRect();
                     if (rect.bottom < 0 || rect.top > innerHeight) return;
                     const distance = Math.abs(rect.top);
                     if (distance < closestDistance) {
+                        const sourceAnchor = anchorByElement.get(element);
                         closestDistance = distance;
-                        line = Number(element.dataset.marklensSourceLine);
+                        line = sourceAnchor?.line ?? null;
+                        anchor = sourceAnchor?.identity ?? null;
+                        occurrence = sourceAnchor?.occurrence ?? null;
+                        previousAnchor = sourceAnchors[sourceAnchor?.index - 1]?.identity ?? null;
+                        nextAnchor = sourceAnchors[sourceAnchor?.index + 1]?.identity ?? null;
+                        offset = rect.top;
                     }
                 });
                 window.webkit.messageHandlers.marklensScrollPosition.postMessage({
                     line: Number.isFinite(line) ? line : null,
-                    progress: progress()
+                    progress: progress(),
+                    anchor,
+                    occurrence,
+                    previousAnchor,
+                    nextAnchor,
+                    offset
                 });
             };
             let scheduled = false;
@@ -775,6 +849,57 @@ struct MarkdownWebView: PlatformViewRepresentable {
                 }
                 return sourceAnchors[Math.max(0, lower - 1)]?.element || null;
             };
+            const targetForAnchor = position => {
+                if (typeof position.anchor !== 'string') return null;
+                const matches = sourceAnchors.filter(anchor => anchor.identity === position.anchor);
+                if (matches.length === 0) return null;
+                if (matches.length === 1) return matches[0].element;
+
+                const requestedOccurrence = position.occurrence === null
+                    ? NaN
+                    : Number(position.occurrence);
+                const requestedProgress = Math.min(
+                    Math.max(Number(position.progress) || 0, 0),
+                    1
+                );
+                const maximum = Math.max(
+                    1,
+                    document.documentElement.scrollHeight - innerHeight
+                );
+                const rank = candidate => {
+                    let contextMatches = 0;
+                    if (typeof position.previousAnchor === 'string'
+                        && sourceAnchors[candidate.index - 1]?.identity === position.previousAnchor) {
+                        contextMatches += 1;
+                    }
+                    if (typeof position.nextAnchor === 'string'
+                        && sourceAnchors[candidate.index + 1]?.identity === position.nextAnchor) {
+                        contextMatches += 1;
+                    }
+                    const occurrenceDistance = Number.isFinite(requestedOccurrence)
+                        ? Math.abs(candidate.occurrence - requestedOccurrence)
+                        : Infinity;
+                    const top = scrollY + candidate.element.getBoundingClientRect().top;
+                    const progressDistance = Math.abs((top / maximum) - requestedProgress);
+                    return { contextMatches, occurrenceDistance, progressDistance };
+                };
+                let best = matches[0];
+                let bestRank = rank(best);
+                matches.slice(1).forEach(candidate => {
+                    const candidateRank = rank(candidate);
+                    const isBetter = candidateRank.contextMatches > bestRank.contextMatches
+                        || (candidateRank.contextMatches === bestRank.contextMatches
+                            && candidateRank.occurrenceDistance < bestRank.occurrenceDistance)
+                        || (candidateRank.contextMatches === bestRank.contextMatches
+                            && candidateRank.occurrenceDistance === bestRank.occurrenceDistance
+                            && candidateRank.progressDistance < bestRank.progressDistance);
+                    if (isBetter) {
+                        best = candidate;
+                        bestRank = candidateRank;
+                    }
+                });
+                return best.element;
+            };
             let activeRestoration = null;
             let restorationTimeout = null;
             const cancelRestoration = () => {
@@ -787,11 +912,12 @@ struct MarkdownWebView: PlatformViewRepresentable {
                 const requestedLine = activeRestoration.line === null
                     ? NaN
                     : Number(activeRestoration.line);
-                const target = Number.isFinite(requestedLine)
-                    ? targetForLine(requestedLine)
-                    : null;
+                const target = targetForAnchor(activeRestoration)
+                    || (Number.isFinite(requestedLine) ? targetForLine(requestedLine) : null);
                 if (target) {
-                    const top = scrollY + target.getBoundingClientRect().top;
+                    const requestedOffset = Number(activeRestoration.offset);
+                    const offset = Number.isFinite(requestedOffset) ? requestedOffset : 0;
+                    const top = scrollY + target.getBoundingClientRect().top - offset;
                     scrollTo(0, top);
                 } else {
                     const maximum = Math.max(
@@ -820,6 +946,17 @@ struct MarkdownWebView: PlatformViewRepresentable {
                     clearTimeout(restorationTimeout);
                     restorationTimeout = setTimeout(cancelRestoration, 5000);
                     applyRestoration();
+                },
+                resolve(position) {
+                    const requestedLine = position.line === null ? NaN : Number(position.line);
+                    const element = targetForAnchor(position)
+                        || (Number.isFinite(requestedLine) ? targetForLine(requestedLine) : null);
+                    const anchor = element ? anchorByElement.get(element) : null;
+                    return anchor ? {
+                        line: anchor.line,
+                        occurrence: anchor.occurrence,
+                        index: anchor.index
+                    } : null;
                 },
                 report
             };

@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.5.3
+
+- Improved automatic external-file refreshes by preserving the current reading position across rendered-content changes and smoothly crossfading updates to avoid flicker.
+
 ## 1.5.2
 
 - Improved rendered-preview search by refocusing the find field with Command-F, using selected text as the query, and supporting Return, Command-G, and Shift-Command-G result navigation.

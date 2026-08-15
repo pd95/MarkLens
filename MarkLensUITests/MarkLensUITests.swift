@@ -301,7 +301,7 @@ private struct MarkLensAppHandle {
 
         let refreshedHeading = app.staticTexts["External Update 20"].firstMatch
         XCTAssertTrue(
-            refreshedHeading.waitForExistence(timeout: 5),
+            refreshedHeading.waitForExistence(timeout: 8),
             "Expected MarkLens to render the externally updated file."
         )
         XCTAssertTrue(

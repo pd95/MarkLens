@@ -16,7 +16,7 @@ final class ExternalFileMonitorTests: XCTestCase {
         try Data("# Before".utf8).write(to: fileURL)
 
         let changed = expectation(description: "external file change")
-        let monitor = ExternalFileMonitor(fileURL: fileURL, initialText: "# Before") { text in
+        let monitor = makeMonitor(fileURL: fileURL, initialText: "# Before") { text in
             XCTAssertEqual(text, "# After")
             changed.fulfill()
         }
@@ -34,7 +34,7 @@ final class ExternalFileMonitorTests: XCTestCase {
         let changed = expectation(description: "successive changes")
         changed.expectedFulfillmentCount = 2
         var received: [String] = []
-        let monitor = ExternalFileMonitor(fileURL: fixture.fileURL, initialText: "One") { text in
+        let monitor = makeMonitor(fileURL: fixture.fileURL, initialText: "One") { text in
             received.append(text)
             changed.fulfill()
         }
@@ -53,7 +53,7 @@ final class ExternalFileMonitorTests: XCTestCase {
         defer { fixture.remove() }
 
         let changed = expectation(description: "recreated file")
-        let monitor = ExternalFileMonitor(fileURL: fixture.fileURL, initialText: "Before") { text in
+        let monitor = makeMonitor(fileURL: fixture.fileURL, initialText: "Before") { text in
             XCTAssertEqual(text, "After")
             changed.fulfill()
         }
@@ -73,7 +73,7 @@ final class ExternalFileMonitorTests: XCTestCase {
 
         let changed = expectation(description: "stale change")
         changed.isInverted = true
-        let monitor = ExternalFileMonitor(fileURL: fixture.fileURL, initialText: "Before") { _ in
+        let monitor = makeMonitor(fileURL: fixture.fileURL, initialText: "Before") { _ in
             changed.fulfill()
         }
 
@@ -89,7 +89,7 @@ final class ExternalFileMonitorTests: XCTestCase {
 
         let changed = expectation(description: "stale external change")
         changed.isInverted = true
-        let monitor = ExternalFileMonitor(fileURL: fixture.fileURL, initialText: "Before") { _ in
+        let monitor = makeMonitor(fileURL: fixture.fileURL, initialText: "Before") { _ in
             changed.fulfill()
         }
 
@@ -103,7 +103,7 @@ final class ExternalFileMonitorTests: XCTestCase {
     func testReplacingFileRejectsAChangedBaseline() async throws {
         let fixture = try MonitorFixture(initialText: "Before")
         defer { fixture.remove() }
-        let monitor = ExternalFileMonitor(fileURL: fixture.fileURL, initialText: "Before") { _ in }
+        let monitor = makeMonitor(fileURL: fixture.fileURL, initialText: "Before") { _ in }
 
         try Data("External".utf8).write(to: fixture.fileURL, options: .atomic)
 
@@ -125,7 +125,7 @@ final class ExternalFileMonitorTests: XCTestCase {
         let fileURL = directoryURL.appendingPathComponent("document.md")
 
         let changed = expectation(description: "created file")
-        let monitor = ExternalFileMonitor(fileURL: fileURL, initialText: "Before") { text in
+        let monitor = makeMonitor(fileURL: fileURL, initialText: "Before") { text in
             XCTAssertEqual(text, "After")
             changed.fulfill()
         }
@@ -135,6 +135,187 @@ final class ExternalFileMonitorTests: XCTestCase {
 
         wait(for: [changed], timeout: 3)
         monitor.stop()
+    }
+
+    func testRecreatedFileStartsANewRewriteWindow() throws {
+        let fixture = try MonitorFixture(initialText: "Before")
+        defer { fixture.remove() }
+
+        let timing = ExternalFileMonitor.ReloadTiming(
+            appendDelay: .milliseconds(50),
+            rewriteQuietPeriod: .milliseconds(180),
+            maximumRewriteDelay: .milliseconds(220),
+            stabilityInterval: .milliseconds(10),
+            reconnectDelay: .milliseconds(30)
+        )
+        var received: [String] = []
+        let monitor = ExternalFileMonitor(
+            fileURL: fixture.fileURL,
+            initialText: "Before",
+            timing: timing
+        ) { text in
+            received.append(text)
+        }
+
+        try FileManager.default.removeItem(at: fixture.fileURL)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.3))
+        try Data("After".utf8).write(to: fixture.fileURL)
+
+        RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+        XCTAssertTrue(received.isEmpty)
+        XCTAssertTrue(waitUntil(timeout: 1) { received == ["After"] })
+        monitor.stop()
+    }
+
+    func testFrequentAppendsAreCoalesced() throws {
+        let fixture = try MonitorFixture(initialText: "Start\n")
+        defer { fixture.remove() }
+
+        let changed = expectation(description: "coalesced append")
+        var received: [String] = []
+        let monitor = makeMonitor(fileURL: fixture.fileURL, initialText: "Start\n") { text in
+            received.append(text)
+            changed.fulfill()
+        }
+
+        try Data("Start\nOne\n".utf8).write(to: fixture.fileURL, options: .atomic)
+        try Data("Start\nOne\nTwo\n".utf8).write(to: fixture.fileURL, options: .atomic)
+        try Data("Start\nOne\nTwo\nThree\n".utf8).write(to: fixture.fileURL, options: .atomic)
+
+        wait(for: [changed], timeout: 1)
+        XCTAssertEqual(received, ["Start\nOne\nTwo\nThree\n"])
+        monitor.stop()
+    }
+
+    func testInPlaceAppendsRefreshAcrossMultipleWindows() throws {
+        let fixture = try MonitorFixture(initialText: "Start\n")
+        defer { fixture.remove() }
+
+        let changed = expectation(description: "periodic append refreshes")
+        changed.expectedFulfillmentCount = 2
+        var received: [String] = []
+        let monitor = makeMonitor(fileURL: fixture.fileURL, initialText: "Start\n") { text in
+            received.append(text)
+            changed.fulfill()
+            if received.count == 1 {
+                try? self.append("Two\n", to: fixture.fileURL)
+            }
+        }
+
+        try append("One\n", to: fixture.fileURL)
+
+        wait(for: [changed], timeout: 1)
+        XCTAssertEqual(received, ["Start\nOne\n", "Start\nOne\nTwo\n"])
+        monitor.stop()
+    }
+
+    func testLargerChangedPrefixUsesRewriteQuietPeriod() throws {
+        let fixture = try MonitorFixture(initialText: "Original")
+        defer { fixture.remove() }
+
+        let changed = expectation(description: "completed rewrite")
+        let startedAt = Date()
+        var received: [String] = []
+        let monitor = makeMonitor(fileURL: fixture.fileURL, initialText: "Original") { text in
+            received.append(text)
+            changed.fulfill()
+        }
+
+        try Data("Intermediate content longer than before".utf8)
+            .write(to: fixture.fileURL, options: .atomic)
+        DispatchQueue.global().asyncAfter(deadline: .now() + .milliseconds(100)) {
+            try? Data("Final rewritten content longer than before".utf8)
+                .write(to: fixture.fileURL, options: .atomic)
+        }
+
+        wait(for: [changed], timeout: 1)
+        XCTAssertEqual(received, ["Final rewritten content longer than before"])
+        XCTAssertGreaterThanOrEqual(Date().timeIntervalSince(startedAt), 0.22)
+        monitor.stop()
+    }
+
+    func testContinuousRewriteUsesMaximumDelay() throws {
+        let fixture = try MonitorFixture(initialText: "Original")
+        defer { fixture.remove() }
+
+        let timing = ExternalFileMonitor.ReloadTiming(
+            appendDelay: .milliseconds(50),
+            rewriteQuietPeriod: .milliseconds(250),
+            maximumRewriteDelay: .milliseconds(350),
+            stabilityInterval: .milliseconds(10),
+            reconnectDelay: .milliseconds(50)
+        )
+        let changed = expectation(description: "bounded rewrite")
+        let startedAt = Date()
+        var received: [String] = []
+        let monitor = ExternalFileMonitor(
+            fileURL: fixture.fileURL,
+            initialText: "Original",
+            timing: timing
+        ) { text in
+            received.append(text)
+            changed.fulfill()
+        }
+
+        try Data("Rewrite zero".utf8).write(to: fixture.fileURL, options: .atomic)
+        for (delay, version) in [(100, 1), (200, 2), (300, 3)] {
+            DispatchQueue.global().asyncAfter(deadline: .now() + .milliseconds(delay)) {
+                try? Data("Rewrite \(version)".utf8).write(to: fixture.fileURL, options: .atomic)
+            }
+        }
+
+        wait(for: [changed], timeout: 1)
+        XCTAssertEqual(received, ["Rewrite 3"])
+        XCTAssertGreaterThanOrEqual(Date().timeIntervalSince(startedAt), 0.3)
+        XCTAssertLessThan(Date().timeIntervalSince(startedAt), 0.7)
+        monitor.stop()
+    }
+
+    func testInvalidUTF8DoesNotReplaceAppendBaseline() throws {
+        let fixture = try MonitorFixture(initialText: "Start")
+        defer { fixture.remove() }
+
+        var received: [String] = []
+        let monitor = makeMonitor(fileURL: fixture.fileURL, initialText: "Start") { text in
+            received.append(text)
+        }
+
+        try Data(Array("Start".utf8) + [0xC3]).write(to: fixture.fileURL, options: .atomic)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.15))
+        try Data("Start".utf8).write(to: fixture.fileURL, options: .atomic)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.3))
+        XCTAssertTrue(received.isEmpty)
+
+        try Data(Array("Start".utf8) + [0xC3, 0xA9])
+            .write(to: fixture.fileURL, options: .atomic)
+        XCTAssertTrue(waitUntil(timeout: 1) { received == ["Starté"] })
+        monitor.stop()
+    }
+
+    private func append(_ text: String, to fileURL: URL) throws {
+        let handle = try FileHandle(forWritingTo: fileURL)
+        defer { try? handle.close() }
+        try handle.seekToEnd()
+        try handle.write(contentsOf: Data(text.utf8))
+    }
+
+    private func makeMonitor(
+        fileURL: URL,
+        initialText: String,
+        changeHandler: @escaping ExternalFileMonitor.ChangeHandler
+    ) -> ExternalFileMonitor {
+        ExternalFileMonitor(
+            fileURL: fileURL,
+            initialText: initialText,
+            timing: ExternalFileMonitor.ReloadTiming(
+                appendDelay: .milliseconds(100),
+                rewriteQuietPeriod: .milliseconds(160),
+                maximumRewriteDelay: .milliseconds(450),
+                stabilityInterval: .milliseconds(10),
+                reconnectDelay: .milliseconds(50)
+            ),
+            changeHandler: changeHandler
+        )
     }
 
     private func waitUntil(

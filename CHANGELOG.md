@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.5.4
+
+- Improved automatic external-file refreshes by updating append-only files promptly, waiting for rewritten files to settle, and bounding refresh delays for continuously changing content.
+
 ## 1.5.3
 
 - Improved automatic external-file refreshes by preserving the current reading position across rendered-content changes and smoothly crossfading updates to avoid flicker.

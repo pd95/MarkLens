@@ -12,7 +12,7 @@ final class ExternalFileMonitor {
         var stabilityInterval: Duration
         var reconnectDelay: Duration
 
-        static let standard = ReloadTiming(
+        nonisolated static let standard = ReloadTiming(
             appendDelay: .seconds(1),
             rewriteQuietPeriod: .seconds(3),
             maximumRewriteDelay: .seconds(10),
@@ -364,9 +364,10 @@ final class ExternalFileMonitor {
 
     private func scheduleReconnect() {
         reconnectTask?.cancel()
+        let reconnectDelay = timing.reconnectDelay
         reconnectTask = Task { [weak self] in
             do {
-                try await Task.sleep(for: timing.reconnectDelay)
+                try await Task.sleep(for: reconnectDelay)
                 guard let self, isActive else { return }
                 if installSource() {
                     restartPendingChangeWindow()

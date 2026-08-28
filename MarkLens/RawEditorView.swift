@@ -165,7 +165,9 @@ private struct LargeDocumentTextEditor: NSViewRepresentable {
                 object: scrollView.contentView,
                 queue: .main
             ) { [weak self] _ in
-                self?.schedulePositionReport()
+                Task { @MainActor [weak self] in
+                    self?.schedulePositionReport()
+                }
             }
         }
 
@@ -562,7 +564,9 @@ private struct RawEditorScrollBridge: NSViewRepresentable {
                 object: clipView,
                 queue: .main
             ) { [weak self] _ in
-                self?.reportPosition()
+                Task { @MainActor [weak self] in
+                    self?.reportPosition()
+                }
             }
         }
 
@@ -573,8 +577,10 @@ private struct RawEditorScrollBridge: NSViewRepresentable {
                 object: textView,
                 queue: .main
             ) { [weak self] _ in
-                guard let self, let textView = self.textView else { return }
-                self.rebuildLineIndex(for: textView.string, debounce: true)
+                Task { @MainActor [weak self] in
+                    guard let self, let textView = self.textView else { return }
+                    self.rebuildLineIndex(for: textView.string, debounce: true)
+                }
             }
         }
 
@@ -726,7 +732,9 @@ private struct RawEditorScrollBridge: UIViewRepresentable {
                     rebuildLineIndex(for: textView.text)
                 }
                 offsetObservation = textView?.observe(\.contentOffset, options: [.new]) { [weak self] _, _ in
-                    self?.reportPosition()
+                    Task { @MainActor [weak self] in
+                        self?.reportPosition()
+                    }
                 }
                 observeTextChanges()
                 if textView == nil, connectionAttempts < 5 {
@@ -778,8 +786,10 @@ private struct RawEditorScrollBridge: UIViewRepresentable {
                 object: textView,
                 queue: .main
             ) { [weak self] _ in
-                guard let self, let textView = self.textView else { return }
-                self.rebuildLineIndex(for: textView.text, debounce: true)
+                Task { @MainActor [weak self] in
+                    guard let self, let textView = self.textView else { return }
+                    self.rebuildLineIndex(for: textView.text, debounce: true)
+                }
             }
         }
 
@@ -880,7 +890,7 @@ struct SourceLineIndex: Sendable {
     private let lineStarts: [Int]
     private let textLength: Int
 
-    init(text: String) {
+    nonisolated init(text: String) {
         var starts = [0]
         starts.reserveCapacity(max(1, text.utf8.count / 80))
         var offset = 0
@@ -927,16 +937,22 @@ struct SourceLineIndex: Sendable {
 
 enum RawEditorPerformanceInstrumentation {
 #if canImport(os)
-    private static let log = OSLog(subsystem: "ch.doapp.MarkLens", category: "RawEditor")
+    nonisolated private static let log = OSLog(
+        subsystem: "ch.doapp.MarkLens",
+        category: "RawEditor"
+    )
 #endif
 
-    static func event(_ name: StaticString, value: Int) {
+    nonisolated static func event(_ name: StaticString, value: Int) {
 #if canImport(os)
         os_signpost(.event, log: log, name: name, "%{public}d", value)
 #endif
     }
 
-    static func measure<Result>(_ name: StaticString, operation: () -> Result) -> Result {
+    nonisolated static func measure<Result>(
+        _ name: StaticString,
+        operation: () -> Result
+    ) -> Result {
 #if canImport(os)
         let signpostID = OSSignpostID(log: log)
         os_signpost(.begin, log: log, name: name, signpostID: signpostID)

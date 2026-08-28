@@ -11,7 +11,7 @@ struct WikiPage: Equatable, Sendable {
     let displayPath: String
     let estimatedByteCount: Int
 
-    init(
+    nonisolated init(
         id: UUID = UUID(),
         url: URL,
         html: String,

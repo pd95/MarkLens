@@ -287,6 +287,7 @@ private final class SyntaxHighlightingHTMLPluginSession: HTMLRenderingPluginSess
     private let languageSubset: [String]
     private let isEnabled: Bool
     private let theme: PipelineContext.Theme
+    private var allowsAutomaticHighlighting = true
     private var containsCodeBlocks = false
 
     init(
@@ -301,8 +302,17 @@ private final class SyntaxHighlightingHTMLPluginSession: HTMLRenderingPluginSess
         self.theme = theme
     }
 
+    func preprocess(_ markdown: String) -> String {
+        allowsAutomaticHighlighting = CodeHighlightingInputPolicy
+            .allowsAutomaticHighlighting(document: markdown)
+        return markdown
+    }
+
     func renderCodeBlock(_ codeBlock: CodeBlock, restoredSource: String) -> String? {
         guard isEnabled else { return nil }
+        guard codeBlock.language != nil || allowsAutomaticHighlighting else {
+            return nil
+        }
         containsCodeBlocks = true
         guard let highlight = engine.highlight(
                 code: restoredSource,

@@ -62,6 +62,58 @@ struct FrontMatterTests {
     #expect(document.html.contains("href=\"#\""))
 }
 
+@Suite("Code Highlighting Input Policy")
+struct CodeHighlightingInputPolicyTests {
+    @Test func largeDocumentsDisableAutomaticHighlighting() {
+        let limit = CodeHighlightingInputPolicy.maximumAutomaticDocumentByteCount
+
+        #expect(CodeHighlightingInputPolicy.allowsAutomaticHighlighting(
+            document: String(repeating: "a", count: limit)
+        ))
+        #expect(CodeHighlightingInputPolicy.allowsAutomaticHighlighting(
+            document: String(repeating: "a", count: limit + 1)
+        ) == false)
+    }
+
+    @Test func automaticHighlightingUsesSmallerLimit() {
+        let limit = CodeHighlightingInputPolicy.maximumAutomaticByteCount
+
+        #expect(CodeHighlightingInputPolicy.allowsHighlighting(
+            code: String(repeating: "a", count: limit),
+            language: nil
+        ))
+        #expect(CodeHighlightingInputPolicy.allowsHighlighting(
+            code: String(repeating: "a", count: limit + 1),
+            language: nil
+        ) == false)
+    }
+
+    @Test func explicitHighlightingUsesLargerLimit() {
+        let limit = CodeHighlightingInputPolicy.maximumExplicitByteCount
+
+        #expect(CodeHighlightingInputPolicy.allowsHighlighting(
+            code: String(repeating: "a", count: limit),
+            language: "swift"
+        ))
+        #expect(CodeHighlightingInputPolicy.allowsHighlighting(
+            code: String(repeating: "a", count: limit + 1),
+            language: "swift"
+        ) == false)
+    }
+
+    @Test func limitsAreMeasuredAsUTF8Bytes() {
+        let code = String(
+            repeating: "é",
+            count: CodeHighlightingInputPolicy.maximumAutomaticByteCount / 2 + 1
+        )
+
+        #expect(CodeHighlightingInputPolicy.allowsHighlighting(
+            code: code,
+            language: nil
+        ) == false)
+    }
+}
+
 #if canImport(JavaScriptCore)
 @Suite("Highlighting")
 struct HighlightingTests {
@@ -90,6 +142,61 @@ struct HighlightingTests {
         let document = try pipeline.render(input: .string(input), context: context)
         #expect(document.html.contains("class=\"hljs"))
         #expect(document.html.contains("language-swift") || document.html.contains("language-javascript"))
+    }
+
+    @Test func oversizedAutomaticBlockFallsBackToPlainCode() throws {
+        let code = String(
+            repeating: "let value = 1\n",
+            count: CodeHighlightingInputPolicy.maximumAutomaticByteCount / 14 + 1
+        )
+        let input = "```\n\(code)```"
+        let document = try MarkdownPipeline().render(
+            input: .string(input),
+            context: PipelineContext()
+        )
+
+        #expect(document.html.contains("class=\"hljs") == false)
+        #expect(document.html.contains("class=\"lang-plaintext\""))
+    }
+
+    @Test func oversizedExplicitBlockFallsBackToPlainCode() throws {
+        let code = String(
+            repeating: "let value = 1\n",
+            count: CodeHighlightingInputPolicy.maximumExplicitByteCount / 14 + 1
+        )
+        let input = "```swift\n\(code)```"
+        let document = try MarkdownPipeline().render(
+            input: .string(input),
+            context: PipelineContext()
+        )
+
+        #expect(document.html.contains("class=\"hljs") == false)
+        #expect(document.html.contains("class=\"lang-swift\""))
+    }
+
+    @Test func largeDocumentSkipsAutomaticButKeepsExplicitHighlighting() throws {
+        let padding = String(
+            repeating: "ordinary prose ",
+            count: CodeHighlightingInputPolicy.maximumAutomaticDocumentByteCount / 14 + 1
+        )
+        let input = """
+        ```
+        let automatic = true
+        ```
+
+        ```swift
+        let explicit = true
+        ```
+
+        \(padding)
+        """
+        let document = try MarkdownPipeline().render(
+            input: .string(input),
+            context: PipelineContext()
+        )
+
+        #expect(document.html.contains("class=\"lang-plaintext\""))
+        #expect(document.html.contains("class=\"hljs language-swift\""))
     }
 }
 #endif

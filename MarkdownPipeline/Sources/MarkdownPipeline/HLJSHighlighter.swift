@@ -8,6 +8,23 @@ struct CodeHighlightResult {
     let language: String?
 }
 
+enum CodeHighlightingInputPolicy {
+    static let maximumAutomaticDocumentByteCount = 1024 * 1024
+    static let maximumAutomaticByteCount = 32 * 1024
+    static let maximumExplicitByteCount = 256 * 1024
+
+    static func allowsAutomaticHighlighting(document: String) -> Bool {
+        document.utf8.count <= maximumAutomaticDocumentByteCount
+    }
+
+    static func allowsHighlighting(code: String, language: String?) -> Bool {
+        let maximumByteCount = language == nil
+            ? maximumAutomaticByteCount
+            : maximumExplicitByteCount
+        return code.utf8.count <= maximumByteCount
+    }
+}
+
 final class HLJSHighlighter {
     private let cache = NSCache<NSString, CodeHighlightBox>()
     private let aliasMap: [String: String] = [
@@ -55,6 +72,12 @@ final class HLJSHighlighter {
             return nil
         }
         let normalizedLanguage = language.flatMap { normalize(language: $0) }
+        guard CodeHighlightingInputPolicy.allowsHighlighting(
+            code: code,
+            language: normalizedLanguage
+        ) else {
+            return nil
+        }
         let cacheKey = cacheKey(for: code, language: normalizedLanguage, subset: languageSubset)
         if let cached = cache.object(forKey: cacheKey) {
             return cached.result

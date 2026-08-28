@@ -1424,11 +1424,11 @@ private struct PreviewFindBar: View {
 
 #Preview {
 #if os(macOS)
-    ContentView(document: MarkdownDocument())
+    ContentView(document: MarkdownDocument(text: MarkdownDocument.starterText))
         .environmentObject(LocalDocumentAccess())
         .environmentObject(UpdateChecker())
 #else
-    ContentView(document: MarkdownDocument())
+    ContentView(document: MarkdownDocument(text: MarkdownDocument.starterText))
         .environmentObject(LocalDocumentAccess())
 #endif
 }

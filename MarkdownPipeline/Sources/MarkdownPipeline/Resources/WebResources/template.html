@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-marklens-theme="{{THEME}}">
     <head>
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -9,6 +9,77 @@
                 '(prefers-reduced-motion: reduce)'
             ).matches ? 0 : 180;
             const copyResetTimers = new WeakMap();
+            const codeLanguageDisplayNames = new Map([
+                ['plaintext', 'Plain text'],
+                ['text', 'Plain text'],
+                ['txt', 'Plain text'],
+                ['bash', 'Bash'],
+                ['c', 'C'],
+                ['cpp', 'C++'],
+                ['csharp', 'C#'],
+                ['css', 'CSS'],
+                ['fsharp', 'F#'],
+                ['html', 'HTML'],
+                ['javascript', 'JavaScript'],
+                ['json', 'JSON'],
+                ['markdown', 'Markdown'],
+                ['objectivec', 'Objective-C'],
+                ['pgsql', 'PostgreSQL'],
+                ['scss', 'SCSS'],
+                ['sql', 'SQL'],
+                ['swift', 'Swift'],
+                ['typescript', 'TypeScript'],
+                ['xml', 'XML'],
+                ['yaml', 'YAML']
+            ]);
+            // Familiar language accents aligned with GitHub Linguist's published colors.
+            const codeLanguageColors = new Map([
+                ['bash', '#89e051'],
+                ['c', '#555555'],
+                ['cpp', '#f34b7d'],
+                ['csharp', '#178600'],
+                ['css', '#663399'],
+                ['dart', '#00b4ab'],
+                ['elixir', '#6e4a7e'],
+                ['erlang', '#b83998'],
+                ['fsharp', '#b845fc'],
+                ['go', '#00add8'],
+                ['haskell', '#5e5086'],
+                ['html', '#e34c26'],
+                ['java', '#b07219'],
+                ['javascript', '#f1e05a'],
+                ['kotlin', '#a97bff'],
+                ['lua', '#000080'],
+                ['markdown', '#083fa1'],
+                ['objectivec', '#438eff'],
+                ['perl', '#0298c3'],
+                ['php', '#4f5d95'],
+                ['pgsql', '#336791'],
+                ['python', '#3572a5'],
+                ['r', '#198ce7'],
+                ['ruby', '#701516'],
+                ['rust', '#dea584'],
+                ['scala', '#c22d40'],
+                ['scss', '#c6538c'],
+                ['shell', '#89e051'],
+                ['swift', '#f05138'],
+                ['typescript', '#3178c6'],
+                ['yaml', '#cb171e']
+            ]);
+            const fallbackCodeLanguageColor = '#8e8e93';
+
+            function codeLanguageDisplayName(identifier) {
+                const normalizedIdentifier = identifier.trim().toLowerCase();
+                const knownName = codeLanguageDisplayNames.get(normalizedIdentifier);
+                if (knownName) {
+                    return knownName;
+                }
+                return normalizedIdentifier
+                    .split(/[-_]/)
+                    .filter(Boolean)
+                    .map(part => part.charAt(0).toUpperCase() + part.slice(1))
+                    .join(' ') || 'Plain text';
+            }
 
             document.addEventListener('DOMContentLoaded', () => {
                 const codeBlocks = Array.from(document.querySelectorAll('pre > code'))
@@ -23,6 +94,30 @@
                     const pre = code.parentElement;
                     const wrapper = document.createElement('div');
                     wrapper.className = 'code-block';
+                    const header = document.createElement('div');
+                    header.className = 'code-block-header';
+                    const languageIdentifier = code.dataset.codeLanguage || 'plaintext';
+                    const languageSource = code.dataset.codeLanguageSource || 'fallback';
+                    const languageName = codeLanguageDisplayName(languageIdentifier);
+                    const languageBadge = document.createElement('span');
+                    languageBadge.className = 'code-language-badge';
+                    languageBadge.dataset.languageSource = languageSource;
+                    const languageColor = codeLanguageColors.get(
+                        languageIdentifier.trim().toLowerCase()
+                    );
+                    languageBadge.dataset.languageColorSource = languageColor
+                        ? 'linguist'
+                        : 'fallback';
+                    languageBadge.style.setProperty(
+                        '--code-language-color',
+                        languageColor || fallbackCodeLanguageColor
+                    );
+                    languageBadge.textContent = languageName;
+                    const languageDescription = languageSource === 'automatic'
+                        ? `Automatically detected language: ${languageName}`
+                        : `Code language: ${languageName}`;
+                    languageBadge.title = languageDescription;
+                    languageBadge.setAttribute('aria-label', languageDescription);
                     const controls = document.createElement('div');
                     controls.className = 'code-block-controls';
                     controls.setAttribute('role', 'group');
@@ -103,6 +198,8 @@
 
                     controls.appendChild(button);
                     pre.parentNode.insertBefore(wrapper, pre);
+                    header.appendChild(languageBadge);
+                    wrapper.appendChild(header);
                     wrapper.appendChild(controls);
                     wrapper.appendChild(pre);
                     if (revealButton) {

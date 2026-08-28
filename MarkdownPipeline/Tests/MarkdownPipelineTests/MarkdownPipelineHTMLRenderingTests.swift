@@ -143,7 +143,7 @@ struct MarkdownPipelineHTMLRenderingTests {
             context: PipelineContext(enableCodeHighlighting: false)
         )
 
-        #expect(document.html.contains("<code class=\"lang-math\">"))
+        #expect(document.html.contains("class=\"lang-math\""))
         #expect(document.html.contains("$x$"))
         #expect(document.html.contains("class=\"math math-display\"") == false)
     }
@@ -466,8 +466,41 @@ struct MarkdownPipelineHTMLRenderingTests {
         let pipeline = MarkdownPipeline()
         let context = PipelineContext(enableCodeHighlighting: false)
         let document = try pipeline.render(input: .string(input), context: context)
-        #expect(document.html.contains("<code class=\"lang-swift\">"))
+        #expect(document.html.contains("class=\"lang-swift\""))
+        #expect(document.html.contains("data-code-language=\"swift\""))
+        #expect(document.html.contains("data-code-language-source=\"explicit\""))
         #expect(document.html.contains("class=\"hljs") == false)
+    }
+
+    @Test func codeBlockLanguageUsesOnlyTheFirstInfoStringToken() throws {
+        let input = """
+        ```swift title="ContentView.swift"
+        let value = 1
+        ```
+        """
+        let document = try MarkdownPipeline().render(
+            input: .string(input),
+            context: PipelineContext(enableCodeHighlighting: false)
+        )
+
+        #expect(document.html.contains("class=\"lang-swift\""))
+        #expect(document.html.contains("data-code-language=\"swift\""))
+        #expect(document.html.contains("title=&quot;ContentView.swift&quot;") == false)
+    }
+
+    @Test func codeBlockLanguageCannotInjectHTMLAttributes() throws {
+        let input = """
+        ```swift" onmouseover="alert(1)
+        let value = 1
+        ```
+        """
+        let document = try MarkdownPipeline().render(
+            input: .string(input),
+            context: PipelineContext(enableCodeHighlighting: false)
+        )
+
+        #expect(document.html.contains("class=\"lang-swift&quot;\""))
+        #expect(document.html.contains(" onmouseover=") == false)
     }
 
     @Test func embedsPrintSafeCodeBlockStyles() throws {
@@ -477,7 +510,7 @@ struct MarkdownPipelineHTMLRenderingTests {
         let context = PipelineContext(enableCodeHighlighting: false)
         let document = try pipeline.render(input: .string(input), context: context)
 
-        #expect(document.html.contains("<code class=\"lang-swift\">\(code)\n</code>"))
+        #expect(document.html.contains("data-code-language-source=\"explicit\">\(code)\n</code>"))
         #expect(document.html.contains("break-after: avoid-page"))
         #expect(document.html.contains("page-break-after: avoid"))
         #expect(document.html.contains("break-before: avoid-page"))
@@ -518,7 +551,7 @@ struct MarkdownPipelineHTMLRenderingTests {
         let preCount = document.html.components(separatedBy: "<pre data-marklens-source-line=").count - 1
 
         #expect(preCount == 1)
-        #expect(document.html.contains("<code class=\"lang-markdown\">"))
+        #expect(document.html.contains("class=\"lang-markdown\""))
         #expect(document.html.contains("```swift"))
         #expect(document.html.contains("let value = 1"))
         #expect(document.html.contains("</code></pre>"))
@@ -658,7 +691,19 @@ struct MarkdownPipelineHTMLRenderingTests {
         )
 
         #expect(document.html.contains("const configuredTheme = 'dark'"))
+        #expect(document.html.contains("data-marklens-theme=\"dark\""))
         #expect(document.html.contains("{{MERMAID_THEME}}") == false)
+    }
+
+    @Test func frontMatterThemeAppliesToTheWholeDocument() throws {
+        let document = try MarkdownPipeline().render(
+            input: .string("---\ntheme: light\n---\n```swift\nlet value = 1\n```"),
+            context: PipelineContext()
+        )
+
+        #expect(document.html.contains("data-marklens-theme=\"light\""))
+        #expect(document.html.contains(":where(:root[data-marklens-theme=\"light\"]) body"))
+        #expect(document.html.contains("{{THEME}}") == false)
     }
 
     @Test func omitsMermaidAssetsFromDocumentsWithoutDiagrams() throws {

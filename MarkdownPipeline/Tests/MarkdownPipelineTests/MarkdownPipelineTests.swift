@@ -74,6 +74,13 @@ struct FrontMatterTests {
     #expect(document.html.contains("content-visibility: visible"))
     #expect(document.html.contains("code-block-collapsed"))
     #expect(document.html.contains("code-block-controls"))
+    #expect(document.html.contains("code-block-header"))
+    #expect(document.html.contains("code-language-badge"))
+    #expect(document.html.contains("Automatically detected language"))
+    #expect(document.html.contains("Plain text"))
+    #expect(document.html.contains("codeLanguageColors"))
+    #expect(document.html.contains("--code-language-color"))
+    #expect(document.html.contains("['pgsql', 'PostgreSQL']"))
     #expect(document.html.contains("role', 'group"))
     #expect(document.html.contains("code-expand-btn"))
     #expect(document.html.contains("code-reveal-btn"))
@@ -155,6 +162,21 @@ struct CodeHighlightingInputPolicyTests {
             language: nil
         ) == false)
     }
+
+    @Test func shortSingleLineBlocksSkipAutomaticDetection() {
+        #expect(CodeHighlightingInputPolicy.allowsAutomaticDetection(
+            code: "no language here"
+        ) == false)
+        #expect(CodeHighlightingInputPolicy.allowsAutomaticDetection(
+            code: "function greet(name) { return name; }"
+        ))
+        #expect(CodeHighlightingInputPolicy.allowsAutomaticDetection(
+            code: """
+            curl example.com \\
+                -H 'Accept: application/json'
+            """
+        ))
+    }
 }
 
 #if canImport(JavaScriptCore)
@@ -170,6 +192,8 @@ struct HighlightingTests {
         let document = try pipeline.render(input: .string(input), context: PipelineContext())
         #expect(document.html.contains("class=\"hljs"))
         #expect(document.html.contains("language-swift"))
+        #expect(document.html.contains("data-code-language=\"swift\""))
+        #expect(document.html.contains("data-code-language-source=\"explicit\""))
     }
 
     @Test func highlightsAutoLanguageBlocksWithSubset() throws {
@@ -185,6 +209,7 @@ struct HighlightingTests {
         let document = try pipeline.render(input: .string(input), context: context)
         #expect(document.html.contains("class=\"hljs"))
         #expect(document.html.contains("language-swift") || document.html.contains("language-javascript"))
+        #expect(document.html.contains("data-code-language-source=\"automatic\""))
     }
 
     @Test func oversizedAutomaticBlockFallsBackToPlainCode() throws {
@@ -200,6 +225,19 @@ struct HighlightingTests {
 
         #expect(document.html.contains("class=\"hljs") == false)
         #expect(document.html.contains("class=\"lang-plaintext\""))
+        #expect(document.html.contains("data-code-language=\"plaintext\""))
+        #expect(document.html.contains("data-code-language-source=\"fallback\""))
+    }
+
+    @Test func shortAutomaticBlockFallsBackToPlainCode() throws {
+        let document = try MarkdownPipeline().render(
+            input: .string("```\nno language here\n```"),
+            context: PipelineContext()
+        )
+
+        #expect(document.html.contains("class=\"hljs") == false)
+        #expect(document.html.contains("class=\"lang-plaintext\""))
+        #expect(document.html.contains("data-code-language-source=\"fallback\""))
     }
 
     @Test func oversizedExplicitBlockFallsBackToPlainCode() throws {

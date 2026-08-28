@@ -63,3 +63,44 @@
         color: #ff8a80;
     }
 }
+
+:where(:root[data-marklens-theme="light"]) .mermaid-hint {
+    color: #684500;
+}
+
+:where(:root[data-marklens-theme="light"]) .mermaid-error {
+    color: #c62828;
+}
+
+:where(:root[data-marklens-theme="light"]) .mermaid-source-fallback {
+    background: #fff4d6;
+    border-color: #d89b21;
+}
+
+:where(:root[data-marklens-theme="light"]) .mermaid-source-fallback pre {
+    background: #fffaf0;
+    border-color: #d89b21;
+}
+
+:where(:root[data-marklens-theme="dark"]) .mermaid-hint,
+:where(:root[data-marklens-theme="dark"]) .mermaid-error {
+    color: var(--blockquote-text-dark);
+}
+
+:where(:root[data-marklens-theme="dark"]) .mermaid-source-fallback {
+    background: #3b2d0d;
+    border-color: #b78319;
+}
+
+:where(:root[data-marklens-theme="dark"]) .mermaid-source-fallback pre {
+    background: #241d0d;
+    border-color: #b78319;
+}
+
+:where(:root[data-marklens-theme="dark"]) .mermaid-source-fallback .mermaid-hint {
+    color: #f2cf7a;
+}
+
+:where(:root[data-marklens-theme="dark"]) .mermaid-error {
+    color: #ff8a80;
+}

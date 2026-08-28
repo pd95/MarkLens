@@ -6,12 +6,38 @@ import JavaScriptCore
 struct CodeHighlightResult {
     let html: String
     let language: String?
+    let relevance: Double
+}
+
+enum CodeLanguageSource: String {
+    case explicit
+    case automatic
+    case fallback
+}
+
+struct CodeLanguageMetadata {
+    static let plainTextIdentifier = "plaintext"
+
+    let identifier: String
+    let source: CodeLanguageSource
+
+    var htmlAttributes: String {
+        " data-code-language=\"\(identifier.encodedHTMLAttribute())\""
+            + " data-code-language-source=\"\(source.rawValue)\""
+    }
 }
 
 enum CodeHighlightingInputPolicy {
     static let maximumAutomaticDocumentByteCount = 1024 * 1024
     static let maximumAutomaticByteCount = 32 * 1024
     static let maximumExplicitByteCount = 256 * 1024
+    static let minimumAutomaticSingleLineByteCount = 24
+    static let minimumAutomaticRelevance = 2.0
+    static let defaultAutomaticLanguageSubset = [
+        "bash", "c", "cpp", "csharp", "css", "go", "java", "javascript", "json", "kotlin",
+        "markdown", "objectivec", "pgsql", "php", "python", "ruby", "rust", "shell", "sql",
+        "swift", "typescript", "xml", "yaml",
+    ]
 
     static func allowsAutomaticHighlighting(document: String) -> Bool {
         document.utf8.count <= maximumAutomaticDocumentByteCount
@@ -23,11 +49,18 @@ enum CodeHighlightingInputPolicy {
             : maximumExplicitByteCount
         return code.utf8.count <= maximumByteCount
     }
+
+    static func allowsAutomaticDetection(code: String) -> Bool {
+        let trimmedCode = code.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmedCode.isEmpty == false else { return false }
+        return trimmedCode.contains(where: { $0.isNewline })
+            || trimmedCode.utf8.count >= minimumAutomaticSingleLineByteCount
+    }
 }
 
 final class HLJSHighlighter {
     private let cache = NSCache<NSString, CodeHighlightBox>()
-    private let aliasMap: [String: String] = [
+    private static let aliasMap: [String: String] = [
         "js": "javascript",
         "ts": "typescript",
         "yml": "yaml",
@@ -37,7 +70,7 @@ final class HLJSHighlighter {
         "rb": "ruby",
         "kt": "kotlin",
         "md": "markdown",
-        "objc": "objectivec"
+        "objc": "objectivec",
     ]
 
     #if canImport(JavaScriptCore)
@@ -71,7 +104,7 @@ final class HLJSHighlighter {
         guard isReady else {
             return nil
         }
-        let normalizedLanguage = language.flatMap { normalize(language: $0) }
+        let normalizedLanguage = Self.normalizedLanguageIdentifier(from: language)
         guard CodeHighlightingInputPolicy.allowsHighlighting(
             code: code,
             language: normalizedLanguage
@@ -96,9 +129,15 @@ final class HLJSHighlighter {
         return result
     }
 
-    private func normalize(language: String) -> String {
-        let lowercased = language.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        return aliasMap[lowercased] ?? lowercased
+    static func normalizedLanguageIdentifier(from infoString: String?) -> String? {
+        guard let identifier = infoString?
+            .split(whereSeparator: { $0.isWhitespace })
+            .first?
+            .lowercased(),
+            identifier.isEmpty == false else {
+            return nil
+        }
+        return aliasMap[identifier] ?? identifier
     }
 
     private func cacheKey(for code: String, language: String?, subset: [String]) -> NSString {
@@ -125,7 +164,11 @@ final class HLJSHighlighter {
               let html = value.toString() else {
             return nil
         }
-        return CodeHighlightResult(html: html, language: language)
+        return CodeHighlightResult(
+            html: html,
+            language: language,
+            relevance: numericValue(result.objectForKeyedSubscript("relevance"))
+        )
         #else
         return nil
         #endif
@@ -133,10 +176,16 @@ final class HLJSHighlighter {
 
     private func highlightAuto(code: String, subset: [String]) -> CodeHighlightResult? {
         #if canImport(JavaScriptCore)
+        guard CodeHighlightingInputPolicy.allowsAutomaticDetection(code: code) else {
+            return nil
+        }
         guard let hljs = context.objectForKeyedSubscript("hljs") else {
             return nil
         }
-        let args: [Any] = subset.isEmpty ? [code] : [code, subset]
+        let resolvedSubset = subset.isEmpty
+            ? CodeHighlightingInputPolicy.defaultAutomaticLanguageSubset
+            : subset
+        let args: [Any] = [code, resolvedSubset]
         guard let result = invoke(hljs, method: "highlightAuto", arguments: args) else {
             return nil
         }
@@ -150,13 +199,25 @@ final class HLJSHighlighter {
         let language = languageValue?.isUndefined == false && languageValue?.isNull == false
             ? languageValue?.toString()
             : nil
-        return CodeHighlightResult(html: html, language: language)
+        let relevance = numericValue(result.objectForKeyedSubscript("relevance"))
+        guard language != nil,
+              relevance >= CodeHighlightingInputPolicy.minimumAutomaticRelevance else {
+            return nil
+        }
+        return CodeHighlightResult(html: html, language: language, relevance: relevance)
         #else
         return nil
         #endif
     }
 
     #if canImport(JavaScriptCore)
+    private func numericValue(_ value: JSValue?) -> Double {
+        guard let value, value.isUndefined == false, value.isNull == false else {
+            return 0
+        }
+        return value.toDouble()
+    }
+
     private func invoke(_ object: JSValue, method: String, arguments: [Any]) -> JSValue? {
         context.exception = nil
         let result = object.invokeMethod(method, withArguments: arguments)

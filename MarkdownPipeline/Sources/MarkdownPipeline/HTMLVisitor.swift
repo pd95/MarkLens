@@ -209,7 +209,14 @@ struct HTMLVisitor: MarkupVisitor {
             return addingSourceLine(to: rendered, for: codeBlock)
         }
 
-        var result = "<pre\(sourceLineAttribute(for: codeBlock))><code class=\"lang-\(codeBlock.language ?? "plaintext")\">"
+        let declaredLanguage = HLJSHighlighter.normalizedLanguageIdentifier(from: codeBlock.language)
+        let metadata = CodeLanguageMetadata(
+            identifier: declaredLanguage ?? CodeLanguageMetadata.plainTextIdentifier,
+            source: declaredLanguage == nil ? .fallback : .explicit
+        )
+        let languageClass = "lang-\(metadata.identifier)".encodedHTMLAttribute()
+        var result = "<pre\(sourceLineAttribute(for: codeBlock))>"
+            + "<code class=\"\(languageClass)\"\(metadata.htmlAttributes)>"
         result += plugins.restoreLiteral(codeBlock.code)
             .trimmingCharacters(in: .newlines)
             .encodedHTMLEntities()

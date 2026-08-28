@@ -4,6 +4,7 @@ struct HTMLEmitter {
     func render(
         bodyHTML: String,
         title: String?,
+        theme: PipelineContext.Theme = .auto,
         additionalStyles: String = "",
         additionalScripts: String = "",
         overrideStyles: String? = nil
@@ -21,6 +22,7 @@ struct HTMLEmitter {
             with: cssBlock + "\n" + overrideBlock
         )
         template = template.replacingOccurrences(of: "{{SCRIPTS}}", with: additionalScripts)
+        template = template.replacingOccurrences(of: "{{THEME}}", with: theme.rawValue)
 
         let resolvedTitle = (title ?? "MarkLens").encodedHTMLEntities()
         template = template

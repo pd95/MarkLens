@@ -3,7 +3,7 @@
 ## 1.6.0
 
 - Improved reliability and responsiveness for very large Markdown documents by limiting syntax-highlighting work, virtualizing code-heavy previews, and using scalable native source editors on macOS and iOS.
-- Added polished controls for oversized code blocks, including collapsed previews, line-count reveal controls, persistent collapse actions, and accessible copy feedback.
+- Added language badges and polished controls for code blocks, including collapsed previews, line-count reveal controls, persistent collapse actions, and accessible copy feedback.
 - Reduced preview work while scrolling and preserved source positions when switching between rendered and editing modes.
 - Fixed preview navigation state on iOS and resolved Swift concurrency warnings exposed by clean cross-platform builds.
 

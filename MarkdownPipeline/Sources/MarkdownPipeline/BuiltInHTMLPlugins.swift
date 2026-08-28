@@ -310,19 +310,28 @@ private final class SyntaxHighlightingHTMLPluginSession: HTMLRenderingPluginSess
 
     func renderCodeBlock(_ codeBlock: CodeBlock, restoredSource: String) -> String? {
         guard isEnabled else { return nil }
-        guard codeBlock.language != nil || allowsAutomaticHighlighting else {
+        let declaredLanguage = HLJSHighlighter.normalizedLanguageIdentifier(from: codeBlock.language)
+        guard declaredLanguage != nil || allowsAutomaticHighlighting else {
             return nil
         }
         containsCodeBlocks = true
         guard let highlight = engine.highlight(
                 code: restoredSource,
-                language: codeBlock.language,
+                language: declaredLanguage,
                 languageSubset: languageSubset
               ) else {
             return nil
         }
-        let languageClass = highlight.language.map { " language-\($0)" } ?? ""
-        return "<pre><code class=\"hljs\(languageClass)\">\(highlight.html)</code></pre>\n"
+        let metadata = CodeLanguageMetadata(
+            identifier: highlight.language ?? CodeLanguageMetadata.plainTextIdentifier,
+            source: highlight.language == nil
+                ? .fallback
+                : (declaredLanguage == nil ? .automatic : .explicit)
+        )
+        let languageClass = highlight.language
+            .map { " language-\($0.encodedHTMLAttribute())" } ?? ""
+        return "<pre><code class=\"hljs\(languageClass)\"\(metadata.htmlAttributes)>"
+            + "\(highlight.html)</code></pre>\n"
     }
 
     func contribution() throws -> HTMLPluginContribution {

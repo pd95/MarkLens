@@ -9,6 +9,10 @@ This is **bold** and *italic* with ~~strikethrough~~.
 Line one with a hard break.  
 Line two continues.
 
+```
+no language here
+```
+
 1. First
 2. Second
 
@@ -20,9 +24,6 @@ Line two continues.
 let value = 1
 ```
 
-```
-no language here
-```
 
 Inline code like `print("hi")` and a [link](https://example.com).
 Unsafe link: [bad](javascript:alert(1)).

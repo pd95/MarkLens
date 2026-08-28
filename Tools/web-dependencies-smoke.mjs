@@ -159,7 +159,106 @@ async function testMermaid() {
     }
 }
 
+async function testCodeBlockLanguageBadges() {
+    const stylesheet = readFileSync(join(resourcesDirectory, "markdown-style.css"), "utf8");
+    const longSwiftCode = Array.from(
+        { length: 80 },
+        (_, index) => `let value${index} = ${index}`
+    ).join("\n");
+    const template = readFileSync(join(resourcesDirectory, "template.html"), "utf8")
+        .replace("{{STYLES}}", `<style>${stylesheet}</style>`)
+        .replace("{{THEME}}", "light")
+        .replace("{{FILENAME}}", "Code block badge test")
+        .replace("{{HTML}}", `
+            <pre><code class="hljs language-swift"
+                data-code-language="swift"
+                data-code-language-source="explicit">${longSwiftCode}</code></pre>
+            <pre><code class="hljs language-javascript"
+                data-code-language="javascript"
+                data-code-language-source="automatic">const value = 1;</code></pre>
+            <pre><code class="lang-plaintext"
+                data-code-language="plaintext"
+                data-code-language-source="fallback">plain text</code></pre>
+            <div style="height: 1000px"></div>
+        `)
+        .replace("{{SCRIPTS}}", "");
+    const browser = await chromium.launch({ headless: true });
+    try {
+        const page = await browser.newPage();
+        await page.emulateMedia({ colorScheme: "dark" });
+        await page.setContent(template);
+
+        assert.deepEqual(
+            await page.locator(".code-language-badge").allTextContents(),
+            ["Swift", "JavaScript", "Plain text"]
+        );
+        const accents = await page.locator(".code-language-badge").evaluateAll(badges =>
+            badges.map(badge => ({
+                color: badge.style.getPropertyValue("--code-language-color"),
+                source: badge.dataset.languageColorSource,
+                dotColor: getComputedStyle(badge, "::before").backgroundColor
+            }))
+        );
+        assert.deepEqual(accents, [
+            { color: "#f05138", source: "linguist", dotColor: "rgb(240, 81, 56)" },
+            { color: "#f1e05a", source: "linguist", dotColor: "rgb(241, 224, 90)" },
+            { color: "#8e8e93", source: "fallback", dotColor: "rgb(142, 142, 147)" }
+        ]);
+        const explicitLightAppearance = await page.locator(".code-block").first().evaluate(block => ({
+            badgeBackground: getComputedStyle(block.querySelector(".code-language-badge")).backgroundColor,
+            badgeBorderStyle: getComputedStyle(block.querySelector(".code-language-badge")).borderStyle,
+            badgeShadow: getComputedStyle(block.querySelector(".code-language-badge")).boxShadow,
+            bodyBackground: getComputedStyle(document.body).backgroundColor,
+            codeBackground: getComputedStyle(block.querySelector("code")).backgroundColor
+        }));
+        assert.deepEqual(explicitLightAppearance, {
+            badgeBackground: "rgba(0, 0, 0, 0)",
+            badgeBorderStyle: "none",
+            badgeShadow: "none",
+            bodyBackground: "rgb(255, 255, 255)",
+            codeBackground: "rgb(246, 246, 246)"
+        });
+        assert.equal(
+            await page.locator(".code-language-badge").nth(1).getAttribute("aria-label"),
+            "Automatically detected language: JavaScript"
+        );
+        assert.equal(await page.locator(".code-block-header").count(), 3);
+        assert.equal(await page.locator(".code-block > .code-block-controls").count(), 3);
+        await page.locator(".code-block").first().hover();
+        await page.waitForTimeout(150);
+        const layout = await page.locator(".code-block").first().evaluate(block => {
+            const badgeBounds = block.querySelector(".code-language-badge").getBoundingClientRect();
+            const controlsBounds = block.querySelector(".code-block-controls").getBoundingClientRect();
+            const code = block.querySelector("code");
+            return {
+                controlsFollowBadge: badgeBounds.right <= controlsBounds.left,
+                codeTopPadding: getComputedStyle(code).paddingTop,
+                controlsOpacity: getComputedStyle(block.querySelector(".code-block-controls")).opacity
+            };
+        });
+        assert.deepEqual(layout, {
+            controlsFollowBadge: true,
+            codeTopPadding: "44px",
+            controlsOpacity: "1"
+        });
+        const initialPositions = await page.locator(".code-block").first().evaluate(block => ({
+            badgeTop: block.querySelector(".code-language-badge").getBoundingClientRect().top,
+            controlsTop: block.querySelector(".code-block-controls").getBoundingClientRect().top
+        }));
+        await page.evaluate(() => window.scrollTo(0, 200));
+        const scrolledPositions = await page.locator(".code-block").first().evaluate(block => ({
+            badgeTop: block.querySelector(".code-language-badge").getBoundingClientRect().top,
+            controlsTop: block.querySelector(".code-block-controls").getBoundingClientRect().top
+        }));
+        assert(scrolledPositions.badgeTop < initialPositions.badgeTop - 100);
+        assert.equal(scrolledPositions.controlsTop, 12);
+    } finally {
+        await browser.close();
+    }
+}
+
 testHighlightJS();
 testKaTeX();
+await testCodeBlockLanguageBadges();
 await testMermaid();
 console.log("Web dependency smoke tests passed.");

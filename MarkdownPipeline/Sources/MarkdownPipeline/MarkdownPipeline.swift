@@ -60,6 +60,7 @@ public struct MarkdownPipeline: Sendable {
                 try HTMLEmitter().render(
                     bodyHTML: renderedBody.html,
                     title: mergedContext.title,
+                    theme: mergedContext.theme,
                     additionalStyles: contribution.styles,
                     additionalScripts: contribution.scripts,
                     overrideStyles: contribution.overrideStyles

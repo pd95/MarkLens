@@ -85,6 +85,7 @@ struct ContentView: View {
         ZStack {
             MarkdownWebView(
                 html: displayedHTML,
+                contentIdentity: displayedPageIdentity,
                 resources: displayedResources,
                 customCSS: customCSS,
                 documentURL: displayedURL,
@@ -848,9 +849,9 @@ struct ContentView: View {
 
     private var displayedPageIdentity: String {
         if let page = wikiNavigation.currentPage {
-            return "wiki:\(page.url.path):\(page.html.hashValue)"
+            return "wiki:\(page.id.uuidString)"
         }
-        return "root:\(document.renderedHTML.hashValue)"
+        return "root:\(document.renderRevision)"
     }
 
     private var isWikiNavigationLoading: Bool {

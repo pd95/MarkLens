@@ -3,12 +3,31 @@ import Foundation
 import MarkdownPipeline
 
 struct WikiPage: Equatable, Sendable {
+    let id: UUID
     let url: URL
     let html: String
     let resources: [HTMLResource]
     let containsWikiLinks: Bool
     let displayPath: String
     let estimatedByteCount: Int
+
+    init(
+        id: UUID = UUID(),
+        url: URL,
+        html: String,
+        resources: [HTMLResource],
+        containsWikiLinks: Bool,
+        displayPath: String,
+        estimatedByteCount: Int
+    ) {
+        self.id = id
+        self.url = url
+        self.html = html
+        self.resources = resources
+        self.containsWikiLinks = containsWikiLinks
+        self.displayPath = displayPath
+        self.estimatedByteCount = estimatedByteCount
+    }
 }
 
 enum WikiLocation: Equatable, Sendable {

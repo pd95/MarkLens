@@ -9,6 +9,9 @@ import SwiftUI
 import Combine
 import MarkdownPipeline
 import UniformTypeIdentifiers
+#if canImport(os)
+import os
+#endif
 
 final class MarkdownDocument: ReferenceFileDocument {
     typealias Snapshot = String
@@ -17,6 +20,7 @@ final class MarkdownDocument: ReferenceFileDocument {
     @Published private(set) var renderedHTML: String
     @Published private(set) var renderedResources: [HTMLResource]
     @Published private(set) var containsWikiLinks: Bool
+    @Published private(set) var renderRevision: Int
     let filename: String?
 
     private static let renderingPipeline = MarkdownPipeline(
@@ -53,6 +57,7 @@ final class MarkdownDocument: ReferenceFileDocument {
         self.renderedHTML = rendering.html
         self.renderedResources = rendering.resources
         self.containsWikiLinks = rendering.containsWikiLinks
+        self.renderRevision = 0
     }
 
     static let readableContentTypes = [
@@ -66,7 +71,9 @@ final class MarkdownDocument: ReferenceFileDocument {
         guard let data = configuration.file.regularFileContents else {
             throw CocoaError(.fileReadCorruptFile)
         }
-        guard let text = String(data: data, encoding: .utf8) else {
+        guard let text = DocumentPerformanceInstrumentation.measure("DocumentDecode", operation: {
+            String(data: data, encoding: .utf8)
+        }) else {
             throw CocoaError(.fileReadCorruptFile)
         }
         self.text = text
@@ -75,6 +82,7 @@ final class MarkdownDocument: ReferenceFileDocument {
         self.renderedHTML = rendering.html
         self.renderedResources = rendering.resources
         self.containsWikiLinks = rendering.containsWikiLinks
+        self.renderRevision = 0
     }
 
     func snapshot(contentType: UTType) throws -> String {
@@ -96,18 +104,38 @@ final class MarkdownDocument: ReferenceFileDocument {
         renderedHTML = rendering.html
         renderedResources = rendering.resources
         containsWikiLinks = rendering.containsWikiLinks
+        renderRevision += 1
     }
 
     private static func renderHTML(
         from markdown: String,
         title: String?
     ) -> (html: String, containsWikiLinks: Bool, resources: [HTMLResource]) {
-        let context = PipelineContext(title: title)
-        if let document = try? renderingPipeline.renderHTML(from: .string(markdown), context: context) {
-            return (document.html, document.containsWikiLinks, document.resources)
+        DocumentPerformanceInstrumentation.measure("DocumentRender") {
+            let context = PipelineContext(title: title)
+            if let document = try? renderingPipeline.renderHTML(from: .string(markdown), context: context) {
+                return (document.html, document.containsWikiLinks, document.resources)
+            }
+            return (renderFailureHTML, false, [])
         }
-        return (renderFailureHTML, false, [])
     }
 
     private static let renderFailureHTML = "<!doctype html><html><body><pre>Unable to render document.</pre></body></html>"
+}
+
+private enum DocumentPerformanceInstrumentation {
+#if canImport(os)
+    private static let log = OSLog(subsystem: "ch.doapp.MarkLens", category: "Document")
+#endif
+
+    static func measure<Result>(_ name: StaticString, operation: () -> Result) -> Result {
+#if canImport(os)
+        let signpostID = OSSignpostID(log: log)
+        os_signpost(.begin, log: log, name: name, signpostID: signpostID)
+        defer {
+            os_signpost(.end, log: log, name: name, signpostID: signpostID)
+        }
+#endif
+        return operation()
+    }
 }

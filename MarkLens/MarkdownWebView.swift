@@ -2,6 +2,9 @@ import Foundation
 import MarkdownPipeline
 import SwiftUI
 import WebKit
+#if canImport(os)
+import os
+#endif
 
 #if os(macOS)
 import AppKit
@@ -20,6 +23,7 @@ typealias PlatformImageView = UIImageView
 struct MarkdownWebView: PlatformViewRepresentable {
 
     var html: String
+    var contentIdentity: String
     var resources: [HTMLResource]
     var customCSS: String
     var documentURL: URL?
@@ -47,6 +51,7 @@ struct MarkdownWebView: PlatformViewRepresentable {
 
     init(
         html: String,
+        contentIdentity: String = "",
         resources: [HTMLResource] = [],
         customCSS: String = "",
         documentURL: URL? = nil,
@@ -70,6 +75,7 @@ struct MarkdownWebView: PlatformViewRepresentable {
         scrollRequest: Int = 0
     ) {
         self.html = html
+        self.contentIdentity = contentIdentity
         self.resources = resources
         self.customCSS = customCSS
         self.documentURL = documentURL
@@ -134,11 +140,12 @@ struct MarkdownWebView: PlatformViewRepresentable {
         webView.allowsLinkPreview = false
         webView.navigationDelegate = context.coordinator
         context.coordinator.webView = webView
-        context.coordinator.latestHash = contentHash
+        context.coordinator.latestContentVersion = contentVersion
 
 #if DEBUG && os(macOS)
         webView.isInspectable = true
 #endif
+        context.coordinator.beginWebViewLoad()
         webView.loadHTMLString(html, baseURL: baseURL)
 
         return webView
@@ -163,6 +170,8 @@ struct MarkdownWebView: PlatformViewRepresentable {
         coordinator.searchGeneration += 1
         coordinator.cancelOutput()
         coordinator.removeReloadSnapshot()
+        coordinator.endWebViewLoad()
+        coordinator.endWebViewPostProcessing()
         coordinator.webView = nil
     }
 
@@ -194,17 +203,18 @@ struct MarkdownWebView: PlatformViewRepresentable {
 
     // MARK: - Coordinator
 
-    private var contentHash: Int {
-        var hasher = Hasher()
-        hasher.combine(html)
-        for resource in resources {
-            hasher.combine(resource.identifier)
-            hasher.combine(resource.contentType)
-            hasher.combine(resource.revision)
-        }
-        hasher.combine(documentURL)
-        hasher.combine(reloadRequest)
-        return hasher.finalize()
+    fileprivate struct ContentVersion: Equatable {
+        let identity: String
+        let documentURL: URL?
+        let reloadRequest: Int
+    }
+
+    private var contentVersion: ContentVersion {
+        ContentVersion(
+            identity: contentIdentity,
+            documentURL: documentURL,
+            reloadRequest: reloadRequest
+        )
     }
 
     class Coordinator: NSObject, WKNavigationDelegate, WKScriptMessageHandler {
@@ -216,7 +226,7 @@ struct MarkdownWebView: PlatformViewRepresentable {
 #endif
 
         var isPageReady = false
-        var latestHash = 0
+        fileprivate var latestContentVersion: ContentVersion?
         var latestFindTerm = ""
         var latestFindRequest = 0
         var latestFindAnchorRequest = 0
@@ -228,20 +238,77 @@ struct MarkdownWebView: PlatformViewRepresentable {
         var latestScrollRequest = 0
         weak var reloadSnapshotView: PlatformImageView?
         var reloadGeneration = 0
+#if canImport(os)
+        private static let performanceLog = OSLog(
+            subsystem: "ch.doapp.MarkLens",
+            category: "WebView"
+        )
+        private var webViewLoadSignpostID: OSSignpostID?
+        private var webViewPostProcessingSignpostID: OSSignpostID?
+#endif
 
         init(parent: MarkdownWebView) {
             self.parent = parent
             super.init()
         }
 
-        func updateState() {
-#if os(macOS)
-            localImageHandler?.documentURL = parent.documentURL
-            localImageHandler?.allowedImageURLs = parent.localImageURLs
+        fileprivate func beginWebViewLoad() {
+#if canImport(os)
+            endWebViewLoad()
+            let signpostID = OSSignpostID(log: Self.performanceLog)
+            webViewLoadSignpostID = signpostID
+            os_signpost(
+                .begin,
+                log: Self.performanceLog,
+                name: "WebViewLoad",
+                signpostID: signpostID
+            )
 #endif
-            resourceHandler?.update(resources: parent.resources)
-            let newHash = parent.contentHash
-            let markdownChanged = newHash != latestHash
+        }
+
+        fileprivate func endWebViewLoad() {
+#if canImport(os)
+            guard let signpostID = webViewLoadSignpostID else { return }
+            os_signpost(
+                .end,
+                log: Self.performanceLog,
+                name: "WebViewLoad",
+                signpostID: signpostID
+            )
+            webViewLoadSignpostID = nil
+#endif
+        }
+
+        private func beginWebViewPostProcessing() {
+#if canImport(os)
+            endWebViewPostProcessing()
+            let signpostID = OSSignpostID(log: Self.performanceLog)
+            webViewPostProcessingSignpostID = signpostID
+            os_signpost(
+                .begin,
+                log: Self.performanceLog,
+                name: "WebViewPostProcessing",
+                signpostID: signpostID
+            )
+#endif
+        }
+
+        fileprivate func endWebViewPostProcessing() {
+#if canImport(os)
+            guard let signpostID = webViewPostProcessingSignpostID else { return }
+            os_signpost(
+                .end,
+                log: Self.performanceLog,
+                name: "WebViewPostProcessing",
+                signpostID: signpostID
+            )
+            webViewPostProcessingSignpostID = nil
+#endif
+        }
+
+        func updateState() {
+            let newContentVersion = parent.contentVersion
+            let markdownChanged = newContentVersion != latestContentVersion
             let findTermChanged = parent.findTerm != latestFindTerm
             let findChanged = findTermChanged || parent.findRequest != latestFindRequest
             let findAnchorChanged = parent.findAnchorRequest != latestFindAnchorRequest
@@ -253,11 +320,16 @@ struct MarkdownWebView: PlatformViewRepresentable {
             var searchUpdateScheduled = false
 
             if isPageReady && markdownChanged {
+#if os(macOS)
+                localImageHandler?.documentURL = parent.documentURL
+                localImageHandler?.allowedImageURLs = parent.localImageURLs
+#endif
+                resourceHandler?.update(resources: parent.resources)
                 isPageReady = false
                 isSearchInstalled = false
                 searchGeneration += 1
                 reloadPage(animated: scrollChanged)
-                latestHash = newHash
+                latestContentVersion = newContentVersion
             } else if isPageReady {
                 if customCSSChanged {
                     applyCustomCSS()
@@ -355,6 +427,7 @@ struct MarkdownWebView: PlatformViewRepresentable {
             let html = parent.html
             let baseURL = parent.baseURL
             guard animated, reloadAnimationsEnabled else {
+                beginWebViewLoad()
                 webView.loadHTMLString(html, baseURL: baseURL)
                 return
             }
@@ -367,6 +440,7 @@ struct MarkdownWebView: PlatformViewRepresentable {
                 if let image {
                     self.installReloadSnapshot(image, over: webView)
                 }
+                self.beginWebViewLoad()
                 webView.loadHTMLString(html, baseURL: baseURL)
             }
         }
@@ -803,6 +877,8 @@ struct MarkdownWebView: PlatformViewRepresentable {
         }
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            endWebViewLoad()
+            beginWebViewPostProcessing()
             isPageReady = true
             isSearchInstalled = false
             let generation = searchGeneration
@@ -827,6 +903,7 @@ struct MarkdownWebView: PlatformViewRepresentable {
                     self.clearOutputBinding(for: request)
                     self.scheduleOutput(request)
                 }
+                self.endWebViewPostProcessing()
             }
         }
 
@@ -835,6 +912,8 @@ struct MarkdownWebView: PlatformViewRepresentable {
             didFail navigation: WKNavigation!,
             withError error: Error
         ) {
+            endWebViewLoad()
+            endWebViewPostProcessing()
             isPageReady = false
             removeReloadSnapshot()
             failPendingOutput()
@@ -845,6 +924,8 @@ struct MarkdownWebView: PlatformViewRepresentable {
             didFailProvisionalNavigation navigation: WKNavigation!,
             withError error: Error
         ) {
+            endWebViewLoad()
+            endWebViewPostProcessing()
             isPageReady = false
             removeReloadSnapshot()
             failPendingOutput()
@@ -925,13 +1006,25 @@ struct MarkdownWebView: PlatformViewRepresentable {
                 });
             };
             let scheduled = false;
+            let lastReportTime = -Infinity;
+            const minimumReportInterval = 100;
             const scheduleReport = () => {
                 if (scheduled) return;
                 scheduled = true;
-                requestAnimationFrame(() => {
+                const delay = Math.max(
+                    0,
+                    minimumReportInterval - (Date.now() - lastReportTime)
+                );
+                const runReport = () => requestAnimationFrame(() => {
                     scheduled = false;
+                    lastReportTime = Date.now();
                     report();
                 });
+                if (delay === 0) {
+                    runReport();
+                } else {
+                    setTimeout(runReport, delay);
+                }
             };
             const visibilityObserver = new IntersectionObserver(entries => {
                 entries.forEach(entry => {

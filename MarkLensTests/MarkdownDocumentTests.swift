@@ -18,6 +18,9 @@ final class MarkdownDocumentTests: XCTestCase {
         let second = MarkdownDocument(text: MarkdownDocument.starterText)
 
         first.updateText("# Changed")
+        XCTAssertEqual(first.renderRevision, 1)
+        first.updateText("# Changed")
+        XCTAssertEqual(first.renderRevision, 1)
         XCTAssertEqual(second.text, MarkdownDocument.starterText)
 
         let snapshot = try second.snapshot(contentType: .appMarkdown)

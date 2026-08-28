@@ -102,7 +102,10 @@ final class ScrollPositionScriptTests: XCTestCase {
         };
         function requestAnimationFrame(callback) { callback(); }
         function addEventListener() {}
-        function setTimeout() { return 1; }
+        function setTimeout(callback, delay) {
+            if (delay <= 100) callback();
+            return 1;
+        }
         function clearTimeout() {}
         function scrollTo(_x, y) { scrollY = y; }
         """)

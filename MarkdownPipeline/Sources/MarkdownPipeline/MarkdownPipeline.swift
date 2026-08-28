@@ -25,34 +25,54 @@ public struct MarkdownPipeline: Sendable {
     }
 
     public func render(input: MarkdownInput, context: PipelineContext) throws -> HTMLDocument {
-        let markdown = try input.resolvedString()
-        let extraction = FrontMatterExtractor().extract(from: markdown)
-        let mergedContext = merge(context: context, frontMatter: extraction.frontMatter)
+        try PipelineInstrumentation.measure("PipelineRender") {
+            let markdown = try PipelineInstrumentation.measure("DocumentRead") {
+                try input.resolvedString()
+            }
+            let extraction = PipelineInstrumentation.measure("FrontMatter") {
+                FrontMatterExtractor().extract(from: markdown)
+            }
+            let mergedContext = merge(context: context, frontMatter: extraction.frontMatter)
 
-        let coordinator = HTMLPluginCoordinator(plugins: plugins, context: mergedContext)
-        let normalizedMarkdown = MarkdownFenceNormalizer().normalize(extraction.bodyMarkdown)
-        let preparedMarkdown = coordinator.preprocess(normalizedMarkdown)
-        let document = SwiftMarkdownParser().parse(markdown: preparedMarkdown)
-        let renderedBody = HTMLVisitor.render(
-            document: document,
-            sourceLineOffset: extraction.bodyLineOffset,
-            plugins: coordinator
-        )
-        let contribution = try coordinator.contribution()
-        let html = try HTMLEmitter().render(
-            bodyHTML: renderedBody.html,
-            title: mergedContext.title,
-            additionalStyles: contribution.styles,
-            additionalScripts: contribution.scripts,
-            overrideStyles: contribution.overrideStyles
-        )
-        return HTMLDocument(
-            html: html,
-            title: mergedContext.title,
-            baseURL: mergedContext.baseURL,
-            containsWikiLinks: contribution.containsWikiLinks,
-            resources: contribution.resources
-        )
+            let coordinator = PipelineInstrumentation.measure("PluginSetup") {
+                HTMLPluginCoordinator(plugins: plugins, context: mergedContext)
+            }
+            let normalizedMarkdown = PipelineInstrumentation.measure("FenceNormalization") {
+                MarkdownFenceNormalizer().normalize(extraction.bodyMarkdown)
+            }
+            let preparedMarkdown = PipelineInstrumentation.measure("PluginPreprocessing") {
+                coordinator.preprocess(normalizedMarkdown)
+            }
+            let document = PipelineInstrumentation.measure("MarkdownParse") {
+                SwiftMarkdownParser().parse(markdown: preparedMarkdown)
+            }
+            let renderedBody = PipelineInstrumentation.measure("HTMLRender") {
+                HTMLVisitor.render(
+                    document: document,
+                    sourceLineOffset: extraction.bodyLineOffset,
+                    plugins: coordinator
+                )
+            }
+            let contribution = try PipelineInstrumentation.measure("PluginAssets") {
+                try coordinator.contribution()
+            }
+            let html = try PipelineInstrumentation.measure("HTMLDocumentAssembly") {
+                try HTMLEmitter().render(
+                    bodyHTML: renderedBody.html,
+                    title: mergedContext.title,
+                    additionalStyles: contribution.styles,
+                    additionalScripts: contribution.scripts,
+                    overrideStyles: contribution.overrideStyles
+                )
+            }
+            return HTMLDocument(
+                html: html,
+                title: mergedContext.title,
+                baseURL: mergedContext.baseURL,
+                containsWikiLinks: contribution.containsWikiLinks,
+                resources: contribution.resources
+            )
+        }
     }
 
     private func merge(context: PipelineContext, frontMatter: FrontMatter?) -> PipelineContext {

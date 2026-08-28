@@ -21,6 +21,12 @@
     --code-inline-text-dark: #f0f6fc;
     --code-block-background-light: #f6f6f6;
     --code-block-background-dark: #1c1b1b;
+    --code-control-surface-light: #f6f6f6;
+    --code-control-surface-dark: #242323;
+    --code-control-hover-light: #e8f2ff;
+    --code-control-hover-dark: #26384b;
+    --code-control-shadow-light: 0 1px 3px rgba(0, 0, 0, 0.10);
+    --code-control-shadow-dark: 0 1px 3px rgba(0, 0, 0, 0.4);
     --blockquote-text-light: #656d76;
     --blockquote-text-dark: #b9b9b9;
     --blockquote-border-light: #656d76;
@@ -35,9 +41,13 @@
     --search-hit-active-background-dark: rgba(255, 159, 10, 0.58);
     --search-hit-active-border-light: rgba(191, 90, 0, 0.55);
     --search-hit-active-border-dark: rgba(255, 159, 10, 0.52);
-    --success-lime: #7CDE4B;
-    --copy-icon: url("data:image/svg+xml,%3Csvg%20width%3D%2225px%22%20height%3D%2225px%22%20viewBox%3D%220%200%2025%2025%22%20version%3D%221.1%22%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20xmlns%3Axlink%3D%22http%3A%2F%2Fwww.w3.org%2F1999%2Fxlink%22%3E%0A%20%20%20%20%3Cg%20transform%3D%22translate(0.1699%2C%200.9893)%22%20fill%3D%22currentColor%22%3E%0A%20%20%20%20%20%20%20%20%3Crect%20id%3D%22Rectangle%22%20opacity%3D%220%22%20x%3D%228.8817842e-16%22%20y%3D%220%22%20width%3D%2224%22%20height%3D%2224%22%3E%3C%2Frect%3E%0A%20%20%20%20%20%20%20%20%3Cpath%20d%3D%22M14.3613667%2C7.72429%20C14.3613667%2C8.40137667%2014.7519667%2C8.78549%2015.4290333%2C8.78549%20L19.0293%2C8.78549%20L19.0293%2C14.9638833%20C19.0293%2C16.3180167%2018.3587667%2C17.00815%2017.0111%2C17.00815%20L16.7637%2C17.00815%20L16.7637%2C13.06935%20C16.7702333%2C12.1318167%2016.4837667%2C11.38315%2015.8847667%2C10.77115%20L12.4082333%2C7.22949667%20C11.7441667%2C6.54590333%2011.0215067%2C6.23991667%2010.00588%2C6.23991667%20L8.87306667%2C6.23991667%20L8.87306667%2C5.86882333%20C8.87306667%2C4.59278333%209.55015333%2C3.87663667%2010.8913%2C3.87663667%20L14.3613667%2C3.87663667%20L14.3613667%2C7.72429%20Z%20M15.7936333%2C4.54721%20L18.5475667%2C7.35319667%20C18.7819%2C7.58106333%2018.9186333%2C7.76335667%2018.9577%2C7.97169%20L15.5527667%2C7.97169%20C15.2923667%2C7.97169%2015.1881667%2C7.86101%2015.1881667%2C7.59408333%20L15.1816333%2C4.14356333%20C15.3835%2C4.16960333%2015.5723%2C4.31283%2015.7936333%2C4.54721%20Z%22%3E%3C%2Fpath%3E%0A%20%20%20%20%20%20%20%20%3Cpath%20d%3D%22M11.3209867%2C12.1774167%20L15.7611%2C12.1774167%20C15.6895%2C11.9234833%2015.5397667%2C11.68915%2015.2533%2C11.3896833%20L11.7767%2C7.84799%20C11.4837467%2C7.55502333%2011.2363533%2C7.35971%2010.9889533%2C7.28809667%20L10.9889533%2C11.8454167%20C10.9889533%2C12.06675%2011.0996333%2C12.1774167%2011.3209867%2C12.1774167%20Z%20M7.73374667%2C20.2568167%20L13.8535667%2C20.2568167%20C15.2011667%2C20.2568167%2015.8717667%2C19.56675%2015.8717667%2C18.21255%20L15.8717667%2C13.06935%20L11.3274933%2C13.06935%20C10.4876533%2C13.06935%2010.0970267%2C12.6722167%2010.0970267%2C11.8388833%20L10.0970267%2C7.12533667%20L7.73374667%2C7.12533667%20C6.3926%2C7.12533667%205.71551333%2C7.80893%205.71551333%2C9.16960333%20L5.71551333%2C18.21255%20C5.71551333%2C19.5732833%206.3926%2C20.2568167%207.73374667%2C20.2568167%20Z%22%3E%3C%2Fpath%3E%0A%20%20%20%20%3C%2Fg%3E%0A%3C%2Fsvg%3E");
-    --check-icon: url("data:image/svg+xml,%3Csvg%20width%3D%2225px%22%20height%3D%2225px%22%20viewBox%3D%220%200%2025%2025%22%20version%3D%221.1%22%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20xmlns%3Axlink%3D%22http%3A%2F%2Fwww.w3.org%2F1999%2Fxlink%22%3E%0A%20%20%20%20%3Cg%20transform%3D%22translate(0.1699%2C%200.9593)%22%20fill%3D%22currentColor%22%3E%0A%20%20%20%20%20%20%20%20%3Crect%20opacity%3D%220%22%20x%3D%220%22%20y%3D%220%22%20width%3D%2224%22%20height%3D%2224%22%3E%3C%2Frect%3E%0A%20%20%20%20%20%20%20%20%3Cpath%20d%3D%22M20.8086%2C6.03809%20L20.8086%2C17.97165%20C20.8086%2C19.98345%2019.793%2C20.98925%2017.7422%2C20.98925%20L5.89651%2C20.98925%20C3.85549%2C20.98925%202.8301%2C19.98345%202.8301%2C17.97165%20L2.8301%2C6.03809%20C2.8301%2C4.02637%203.85549%2C3.01075%205.89651%2C3.01075%20L17.7422%2C3.01075%20C19.793%2C3.01075%2020.8086%2C4.02637%2020.8086%2C6.03809%20Z%20M14.8613%2C8.11817%20L10.69143%2C14.81735%20L8.70901%2C12.2588%20C8.46487%2C11.93653%208.25002%2C11.84864%207.97658%2C11.84864%20C7.52737%2C11.84864%207.18557%2C12.20997%207.18557%2C12.64942%20C7.18557%2C12.87403%207.27346%2C13.08885%207.41994%2C13.28415%20L9.87112%2C16.29195%20C10.12502%2C16.63375%2010.39846%2C16.77055%2010.73049%2C16.77055%20C11.06252%2C16.77055%2011.34572%2C16.61425%2011.5508%2C16.29195%20L16.1406%2C9.06544%20C16.2676%2C8.86036%2016.3848%2C8.63575%2016.3848%2C8.42091%20C16.3848%2C7.96192%2015.9844%2C7.66895%2015.5645%2C7.66895%20C15.3008%2C7.66895%2015.0469%2C7.8252%2014.8613%2C8.11817%20Z%22%3E%3C%2Fpath%3E%0A%20%20%20%20%3C%2Fg%3E%0A%3C%2Fsvg%3E");
+    --copy-success-surface-light: rgba(52, 199, 89, 0.18);
+    --copy-success-surface-dark: rgba(48, 209, 88, 0.23);
+    --copy-success-foreground-light: #137A36;
+    --copy-success-foreground-dark: #5BD675;
+    --copy-icon-tight: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2018%2018%22%3E%3Cg%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.5%22%20stroke-linejoin%3D%22round%22%3E%3Crect%20x%3D%225.25%22%20y%3D%221.75%22%20width%3D%229.5%22%20height%3D%2212%22%20rx%3D%221.75%22%2F%3E%3Cpath%20d%3D%22M5.25%204.25h-.5a2%202%200%200%200-2%202v8a2%202%200%200%200%202%202h6a2%202%200%200%200%202-2v-.5%22%2F%3E%3C%2Fg%3E%3C%2Fsvg%3E");
+    --success-icon-tight: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2018%2018%22%3E%3Cpath%20d%3D%22m2.5%209.5%204%204%209-9%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%2F%3E%3C%2Fsvg%3E");
+    --chevron-icon: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2012%2012%22%3E%3Cpath%20d%3D%22m2%204.5%204%204%204-4%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.5%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%2F%3E%3C%2Fsvg%3E");
 }
 
 body {
@@ -100,6 +110,11 @@ pre {
 /* Copy button for code blocks */
 .code-block {
     position: relative;
+    display: flow-root;
+}
+
+.code-block > pre > code:only-child {
+    padding-top: 2.75rem;
 }
 
 /* Skip layout and paint for distant code in unusually code-heavy documents. */
@@ -108,129 +123,389 @@ pre {
     contain-intrinsic-block-size: auto var(--code-block-intrinsic-size, 4rem);
 }
 
-.copy-btn {
-    position: absolute;
-    top: -1rem;
-    right: 0.3125rem;
-    cursor: pointer;
-    padding: 0.0625rem 0.1875rem;
-    font-size: .9rem;
-    background: var(--background-light);
-    color: var(--text-light);
-    border: 1px solid var(--line-light);
-    border-radius: 6px;
-    opacity: .25;
-    transform: translateZ(0);
-    transform-origin: center;
-    transition: background-color 160ms ease, color 160ms ease, opacity 160ms ease, transform 160ms ease;
+.code-block-virtualized.code-block-collapsed {
+    contain-intrinsic-block-size: auto 32.925rem;
 }
 
-.copy-btn:focus-visible {
+.code-block-collapsed pre {
+    max-height: 32rem;
+    overflow-y: hidden;
+}
+
+.code-block-collapsed::after {
+    content: "";
+    position: absolute;
+    z-index: 1;
+    right: 1px;
+    bottom: calc(0.4rem + 1px);
+    left: 1px;
+    height: 4rem;
+    border-radius: 0 0 5px 5px;
+    background: linear-gradient(to bottom, transparent, var(--code-block-background-light));
+    pointer-events: none;
+}
+
+.code-block-controls {
+    position: sticky;
+    z-index: 2;
+    top: 0.75rem;
+    display: flex;
+    align-items: center;
+    width: max-content;
+    height: 1.875rem;
+    margin-top: 0.75rem;
+    margin-right: 0.75rem;
+    margin-bottom: -2.625rem;
+    margin-left: auto;
+    border: 1px solid var(--line-light);
+    border-radius: 8px;
+    background: var(--code-control-surface-light);
+    box-shadow: var(--code-control-shadow-light);
+    box-sizing: border-box;
+}
+
+.copy-btn {
+    position: relative;
+    width: 1.75rem;
+    height: 1.75rem;
+    padding: 0.3125rem;
+    border: 0;
+    border-radius: 7px;
+    background: transparent;
+    color: var(--text-light);
+    opacity: 0.75;
+    cursor: pointer;
+    transition: background-color 120ms ease-out, color 120ms ease-out, opacity 120ms ease-out;
+}
+
+.code-expand-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.25rem;
+    min-height: 2rem;
+    padding: 0 0.625rem;
+    border: 1px solid var(--line-light);
+    border-radius: 999px;
+    background: var(--code-control-surface-light);
+    color: var(--text-light);
+    font: inherit;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    box-shadow: var(--code-control-shadow-light);
+    cursor: pointer;
+    transition:
+        background-color 120ms ease,
+        color 120ms ease,
+        opacity 180ms ease-out,
+        transform 180ms ease-out;
+}
+
+.code-reveal-btn {
+    position: absolute;
+    z-index: 2;
+    bottom: 1rem;
+    left: 50%;
+    transform: translateX(-50%);
+}
+
+.code-reveal-btn.is-exiting {
+    opacity: 0;
+    pointer-events: none;
+    transform: translateX(-50%) scale(0.94);
+}
+
+.code-reveal-btn.is-inactive {
+    visibility: hidden;
+    opacity: 0;
+    pointer-events: none;
+}
+
+.code-block-controls > .code-expand-btn {
+    height: 1.75rem;
+    min-height: 0;
+    border: 0;
+    border-right: 1px solid var(--line-light);
+    border-radius: 7px 0 0 7px;
+    background: transparent;
+    box-shadow: none;
+}
+
+.code-block-controls > .code-collapse-btn {
+    max-width: 0;
+    padding-inline: 0;
+    overflow: hidden;
+    border-right-width: 0;
+    opacity: 0;
+    pointer-events: none;
+    white-space: nowrap;
+    transform: scale(0.94);
+    transform-origin: right center;
+    transition:
+        max-width 180ms cubic-bezier(0.2, 0.8, 0.2, 1),
+        padding 180ms cubic-bezier(0.2, 0.8, 0.2, 1),
+        border-color 180ms ease,
+        opacity 180ms ease-out,
+        transform 180ms ease-out;
+}
+
+.code-block-controls > .code-collapse-btn.is-active {
+    max-width: 8rem;
+    padding-inline: 0.625rem;
+    border-right-width: 1px;
     opacity: 1;
-    background: var(--link-light);
-    color: var(--text-dark);
+    pointer-events: auto;
+    transform: scale(1);
+}
+
+.code-collapse-btn.is-active + .copy-btn {
+    border-radius: 0 7px 7px 0;
+}
+
+.code-collapse-btn > .code-expand-icon,
+.code-collapse-btn > .code-expand-label {
+    opacity: 0;
+    transition: opacity 90ms ease-out;
+}
+
+.code-collapse-btn.is-active > .code-expand-icon,
+.code-collapse-btn.is-active > .code-expand-label {
+    opacity: 1;
+    transition-delay: 120ms;
+}
+
+.code-block-controls > .code-collapse-btn.is-exiting {
+    opacity: 0;
+    pointer-events: none;
+    transform: scale(0.94);
+}
+
+.code-expand-icon {
+    width: 0.75rem;
+    height: 0.75rem;
+    background-color: currentColor;
+    mask-image: var(--chevron-icon);
+    mask-position: center;
+    mask-repeat: no-repeat;
+    mask-size: contain;
+    -webkit-mask-image: var(--chevron-icon);
+    -webkit-mask-position: center;
+    -webkit-mask-repeat: no-repeat;
+    -webkit-mask-size: contain;
+    transition: transform 120ms ease;
+}
+
+.code-expand-btn[aria-expanded="true"] .code-expand-icon {
+    transform: rotate(180deg);
+}
+
+.copy-btn:focus-visible,
+.code-expand-btn:focus-visible {
+    outline: 2px solid var(--link-light);
+    outline-offset: 2px;
 }
 
 @media (hover: hover) {
-    .copy-btn:hover {
+    .copy-btn:hover,
+    .code-expand-btn:not(.is-exiting):hover {
         opacity: 1;
-        background: var(--link-light);
-        color: var(--text-dark);
+        background: var(--code-control-hover-light);
+        color: var(--link-light);
     }
 }
 
 .copy-btn.is-copied {
     opacity: 1;
-    background: var(--success-lime);
-    color: var(--text-dark);
-    transform: scale(1.08);
-    animation: copy-pop 180ms ease-out;
+    background: var(--copy-success-surface-light);
+    transition-duration: 140ms, 140ms, 120ms;
+    transition-timing-function: cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
-@keyframes copy-pop {
-    0% {
-        transform: scale(1);
+@media (hover: hover) and (pointer: fine) {
+    .code-block:not(.code-block-collapsible) > .code-block-controls,
+    .code-block-collapsed > .code-block-controls {
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 120ms ease;
     }
-    60% {
-        transform: scale(1.12);
-    }
-    100% {
-        transform: scale(1.08);
+
+    .code-block:not(.code-block-collapsible):hover > .code-block-controls,
+    .code-block-collapsed:hover > .code-block-controls,
+    .code-block-controls:focus-within {
+        opacity: 1;
+        pointer-events: auto;
     }
 }
 
 @media (pointer: coarse) {
-    .copy-btn.is-copied {
-        transform: scale(1.18);
-        box-shadow: 0 0 0 4px rgba(86, 187, 106, 0.35);
-        animation: copy-pop-coarse 220ms ease-out;
+    .code-block-controls {
+        height: 2.75rem;
+        margin-bottom: -3.5rem;
     }
-}
 
-@keyframes copy-pop-coarse {
-    0% {
-        transform: scale(1);
+    .copy-btn {
+        width: 2.6875rem;
+        height: 2.6875rem;
+        padding: 0.71875rem;
     }
-    60% {
-        transform: scale(1.22);
+
+    .code-expand-btn {
+        min-height: 2.75rem;
+        padding-inline: 0.875rem;
     }
-    100% {
-        transform: scale(1.18);
+
+    .code-block-controls > .code-expand-btn {
+        height: 2.6875rem;
+    }
+
+    .code-block-controls > .code-collapse-btn:not(.is-active) {
+        padding-inline: 0;
+    }
+
+    .code-block-controls > .code-collapse-btn.is-active {
+        padding-inline: 0.875rem;
     }
 }
 
 @media (prefers-reduced-motion: reduce) {
-    .copy-btn {
+    .copy-btn,
+    .code-expand-icon {
         transition: none;
     }
-    .copy-btn.is-copied {
-        animation: none;
+
+    .code-expand-btn {
+        transition: none;
+    }
+
+    .code-block-controls > .code-collapse-btn {
+        transition: none;
+    }
+
+    .code-collapse-btn > .code-expand-icon,
+    .code-collapse-btn > .code-expand-label {
+        transition: none;
+    }
+
+    .code-block-controls {
+        transition: none;
     }
 }
 
 /* dark‑mode tweaks */
 @media (prefers-color-scheme: dark) {
     .copy-btn {
-        background: var(--background-dark);
         color: var(--text-dark);
+    }
+
+    .code-block-controls {
         border-color: var(--line-dark);
+        background: var(--code-control-surface-dark);
+        box-shadow: var(--code-control-shadow-dark);
     }
-    .copy-btn:focus-visible {
-        background: var(--link-dark);
-        color: var(--text-light);
-    }
+
     @media (hover: hover) {
-        .copy-btn:hover {
-            background: var(--link-dark);
-            color: var(--text-light);
+        .copy-btn:hover,
+        .code-expand-btn:not(.is-exiting):hover {
+            background: var(--code-control-hover-dark);
+            color: var(--link-dark);
         }
     }
+
     .copy-btn.is-copied {
-        background: var(--success-lime);
+        background: var(--copy-success-surface-dark);
+    }
+
+    .code-block-collapsed::after {
+        background: linear-gradient(to bottom, transparent, var(--code-block-background-dark));
+    }
+
+    .code-expand-btn {
+        border-color: var(--line-dark);
+        background: var(--code-control-surface-dark);
         color: var(--text-dark);
+        box-shadow: var(--code-control-shadow-dark);
+    }
+
+    .copy-btn:focus-visible,
+    .code-expand-btn:focus-visible {
+        outline-color: var(--link-dark);
+    }
+
+    .code-block-controls > .code-expand-btn {
+        border-right-color: var(--line-dark);
+        background: transparent;
+        box-shadow: none;
     }
 }
 
-.copy-btn::before {
+.copy-btn::before,
+.copy-btn::after {
     content: "";
+    position: absolute;
+    top: 50%;
+    left: 50%;
     display: block;
-    width: 1.5rem;
-    height: 1.5rem;
+    width: 1.125rem;
+    height: 1.125rem;
     background-color: currentColor;
-    mask-image: var(--copy-icon);
     mask-repeat: no-repeat;
     mask-position: center;
     mask-size: contain;
-    -webkit-mask-image: var(--copy-icon);
     -webkit-mask-repeat: no-repeat;
     -webkit-mask-position: center;
     -webkit-mask-size: contain;
     pointer-events: none;
 }
 
+.copy-btn::before {
+    opacity: 1;
+    mask-image: var(--copy-icon-tight);
+    -webkit-mask-image: var(--copy-icon-tight);
+    transform: translate(-50%, -50%) scale(1);
+    transition: opacity 120ms ease-out, transform 120ms ease-out;
+}
+
+.copy-btn::after {
+    opacity: 0;
+    background-color: var(--copy-success-foreground-light);
+    mask-image: var(--success-icon-tight);
+    -webkit-mask-image: var(--success-icon-tight);
+    transform: translate(-50%, -50%) scale(0.88);
+    transition: opacity 120ms ease-out, transform 120ms ease-out;
+}
+
 .copy-btn.is-copied::before {
-    mask-image: var(--check-icon);
-    -webkit-mask-image: var(--check-icon);
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.88);
+    transition-duration: 80ms;
+}
+
+.copy-btn.is-copied::after {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+    transition-duration: 140ms;
+    transition-timing-function: cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+@media (pointer: coarse) {
+    .copy-btn::before,
+    .copy-btn::after {
+        width: 1.25rem;
+        height: 1.25rem;
+    }
+}
+
+@media (prefers-color-scheme: dark) {
+    .copy-btn::after {
+        background-color: var(--copy-success-foreground-dark);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .copy-btn::before,
+    .copy-btn::after {
+        transition: none;
+    }
 }
 
 .sr-only {
@@ -404,8 +679,21 @@ img {
         contain-intrinsic-block-size: none;
     }
 
-    .copy-btn {
+    .code-block-controls {
         display: none;
+    }
+
+    .code-block-collapsed pre {
+        max-height: none;
+        overflow: visible;
+    }
+
+    .code-block-collapsed::after {
+        display: none;
+    }
+
+    .code-block > pre > code:only-child {
+        padding-top: 1em;
     }
 
     h1, h2, h3, h4, h5, h6 {

@@ -62,7 +62,7 @@ struct FrontMatterTests {
     #expect(document.html.contains("href=\"#\""))
 }
 
-@Test func includesLargeDocumentCodeBlockVirtualization() throws {
+@Test func includesLargeDocumentCodeBlockControlsAndVirtualization() throws {
     let document = try MarkdownPipeline().render(
         input: .string("```\ncode\n```"),
         context: PipelineContext()
@@ -72,6 +72,37 @@ struct FrontMatterTests {
     #expect(document.html.contains("content-visibility: auto"))
     #expect(document.html.contains("contain-intrinsic-block-size: auto"))
     #expect(document.html.contains("content-visibility: visible"))
+    #expect(document.html.contains("code-block-collapsed"))
+    #expect(document.html.contains("code-block-controls"))
+    #expect(document.html.contains("role', 'group"))
+    #expect(document.html.contains("code-expand-btn"))
+    #expect(document.html.contains("code-reveal-btn"))
+    #expect(document.html.contains("code-collapse-btn"))
+    #expect(document.html.contains("code-block-transitioning"))
+    #expect(document.html.contains("more lines"))
+    #expect(document.html.contains("aria-expanded"))
+    #expect(document.html.contains("max-height: 32rem"))
+    #expect(document.html.contains("position: sticky"))
+    #expect(document.html.contains("pointer: fine"))
+    #expect(document.html.contains("code-block-collapsed:hover"))
+    #expect(document.html.contains("padding-top: 2.75rem"))
+    #expect(document.html.contains("code:only-child"))
+    #expect(document.html.contains("code-control-hover-light"))
+    #expect(document.html.contains("copy-icon-tight"))
+    #expect(document.html.contains("success-icon-tight"))
+    #expect(document.html.contains("chevron-icon"))
+    #expect(document.html.contains("copy-success-surface-light"))
+    #expect(document.html.contains(".copy-btn::after"))
+    #expect(document.html.contains("transition-duration: 140ms"))
+    #expect(document.html.contains("opacity 120ms ease-out"))
+    #expect(document.html.contains("opacity 180ms ease-out"))
+    #expect(document.html.contains("transition-delay: 120ms"))
+    #expect(document.html.contains("code-expand-btn:not(.is-exiting):hover"))
+    #expect(document.html.contains("code-collapse-btn.is-active + .copy-btn"))
+    #expect(document.html.contains("focus({ preventScroll: true })"))
+    #expect(document.html.contains("codeControlTransitionDuration"))
+    #expect(document.html.contains("copyResetTimers"))
+    #expect(document.html.contains("}, 1200);"))
 }
 
 @Suite("Code Highlighting Input Policy")

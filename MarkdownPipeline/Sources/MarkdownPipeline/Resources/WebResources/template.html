@@ -5,6 +5,11 @@
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         {{STYLES}}
         <script>
+            const codeControlTransitionDuration = window.matchMedia(
+                '(prefers-reduced-motion: reduce)'
+            ).matches ? 0 : 180;
+            const copyResetTimers = new WeakMap();
+
             document.addEventListener('DOMContentLoaded', () => {
                 const codeBlocks = Array.from(document.querySelectorAll('pre > code'))
                     .filter(code => !code.closest('[data-mermaid-diagram]'));
@@ -12,20 +17,30 @@
                     CSS.supports('content-visibility', 'auto') &&
                     CSS.supports('contain-intrinsic-block-size', 'auto 1px') &&
                     (codeBlocks.length >= 100 || codeBlocks.some(code => code.textContent.length >= 65536));
+                const maximumCollapsedBlockSize = 32;
 
-                codeBlocks.forEach(code => {
+                codeBlocks.forEach((code, blockIndex) => {
                     const pre = code.parentElement;
                     const wrapper = document.createElement('div');
                     wrapper.className = 'code-block';
-                    if (canVirtualizeCodeBlocks) {
-                        let lineCount = 1;
-                        const text = code.textContent;
-                        for (let index = 0; index < text.length; index += 1) {
-                            if (text.charCodeAt(index) === 10) {
-                                lineCount += 1;
-                            }
+                    const controls = document.createElement('div');
+                    controls.className = 'code-block-controls';
+                    controls.setAttribute('role', 'group');
+                    controls.setAttribute('aria-label', 'Code block actions');
+                    let revealButton = null;
+                    let lineCount = 1;
+                    const text = code.textContent;
+                    for (let index = 0; index < text.length; index += 1) {
+                        if (text.charCodeAt(index) === 10) {
+                            lineCount += 1;
                         }
-                        const estimatedBlockSize = lineCount * 1.178125 + 0.8;
+                    }
+                    if (lineCount > 1 && text.endsWith('\n')) {
+                        lineCount -= 1;
+                    }
+                    const estimatedBlockSize = lineCount * 1.178125 + 4.675;
+
+                    if (canVirtualizeCodeBlocks) {
                         wrapper.classList.add('code-block-virtualized');
                         wrapper.style.setProperty(
                             '--code-block-intrinsic-size',
@@ -45,18 +60,111 @@
                     label.textContent = 'Copy code';
                     button.appendChild(label);
 
+                    if (estimatedBlockSize > maximumCollapsedBlockSize) {
+                        const codeBlockID = `code-block-${blockIndex}`;
+                        pre.id = codeBlockID;
+                        wrapper.classList.add('code-block-collapsible', 'code-block-collapsed');
+
+                        revealButton = document.createElement('button');
+                        revealButton.type = 'button';
+                        revealButton.className = 'code-expand-btn code-reveal-btn';
+                        revealButton.setAttribute('aria-controls', codeBlockID);
+                        revealButton.setAttribute('aria-expanded', 'false');
+                        const hiddenLineCount = Math.max(1, lineCount - 24);
+                        const collapsedLabel = `Show ${hiddenLineCount} more lines`;
+
+                        const expandIcon = document.createElement('span');
+                        expandIcon.className = 'code-expand-icon';
+                        expandIcon.setAttribute('aria-hidden', 'true');
+                        const expandLabel = document.createElement('span');
+                        expandLabel.className = 'code-expand-label';
+                        expandLabel.textContent = collapsedLabel;
+                        revealButton.appendChild(expandIcon);
+                        revealButton.appendChild(expandLabel);
+
+                        const collapseButton = document.createElement('button');
+                        collapseButton.type = 'button';
+                        collapseButton.className = 'code-expand-btn code-collapse-btn';
+                        collapseButton.setAttribute('aria-controls', codeBlockID);
+                        collapseButton.setAttribute('aria-expanded', 'true');
+                        collapseButton.setAttribute('aria-hidden', 'true');
+                        collapseButton.tabIndex = -1;
+
+                        const collapseIcon = document.createElement('span');
+                        collapseIcon.className = 'code-expand-icon';
+                        collapseIcon.setAttribute('aria-hidden', 'true');
+                        const collapseLabel = document.createElement('span');
+                        collapseLabel.className = 'code-expand-label';
+                        collapseLabel.textContent = 'Collapse';
+                        collapseButton.appendChild(collapseIcon);
+                        collapseButton.appendChild(collapseLabel);
+                        controls.appendChild(collapseButton);
+                    }
+
+                    controls.appendChild(button);
                     pre.parentNode.insertBefore(wrapper, pre);
-                    wrapper.appendChild(button);
+                    wrapper.appendChild(controls);
                     wrapper.appendChild(pre);
+                    if (revealButton) {
+                        wrapper.appendChild(revealButton);
+                    }
                 });
             });
 
             document.addEventListener('click', e => {
+                const expandButton = e.target.closest('.code-expand-btn');
+                if (expandButton) {
+                    const wrapper = expandButton.closest('.code-block');
+                    if (wrapper.classList.contains('code-block-transitioning')) {
+                        return;
+                    }
+                    const controls = wrapper.querySelector('.code-block-controls');
+                    const revealButton = wrapper.querySelector('.code-reveal-btn');
+                    const collapseButton = controls.querySelector('.code-collapse-btn');
+                    const copyButton = controls.querySelector('.copy-btn');
+                    const shouldTransferFocus = document.activeElement === expandButton;
+                    wrapper.classList.add('code-block-transitioning');
+                    expandButton.classList.add('is-exiting');
+
+                    if (expandButton === revealButton) {
+                        setTimeout(() => {
+                            wrapper.classList.remove('code-block-collapsed');
+                            revealButton.classList.remove('is-exiting');
+                            revealButton.classList.add('is-inactive');
+                            revealButton.setAttribute('aria-hidden', 'true');
+                            revealButton.tabIndex = -1;
+                            collapseButton.classList.add('is-active');
+                            collapseButton.setAttribute('aria-hidden', 'false');
+                            collapseButton.tabIndex = 0;
+                            wrapper.classList.remove('code-block-transitioning');
+                            if (shouldTransferFocus) {
+                                collapseButton.focus({ preventScroll: true });
+                            }
+                        }, codeControlTransitionDuration);
+                    } else {
+                        setTimeout(() => {
+                            wrapper.scrollIntoView({ block: 'start', behavior: 'auto' });
+                            wrapper.classList.add('code-block-collapsed');
+                            collapseButton.classList.remove('is-active', 'is-exiting');
+                            collapseButton.setAttribute('aria-hidden', 'true');
+                            collapseButton.tabIndex = -1;
+                            revealButton.classList.remove('is-inactive');
+                            revealButton.setAttribute('aria-hidden', 'false');
+                            revealButton.tabIndex = 0;
+                            wrapper.classList.remove('code-block-transitioning');
+                            if (shouldTransferFocus) {
+                                copyButton.focus({ preventScroll: true });
+                            }
+                        }, codeControlTransitionDuration);
+                    }
+                    return;
+                }
+
                 const button = e.target.closest('.copy-btn');
                 if (!button) {
                     return;
                 }
-                const code = button.closest('.code-block').querySelector('code').innerText;
+                const code = button.closest('.code-block').querySelector('code').textContent;
                 navigator.clipboard.writeText(code).then(() => {
                     const label = button.querySelector('.sr-only');
                     button.classList.add('is-copied');
@@ -64,10 +172,13 @@
                     if (window.matchMedia('(pointer: coarse)').matches) {
                         button.blur();
                     }
-                    setTimeout(() => {
+                    clearTimeout(copyResetTimers.get(button));
+                    const resetTimer = setTimeout(() => {
                         button.classList.remove('is-copied');
                         label.textContent = 'Copy code';
-                    }, 1500);
+                        copyResetTimers.delete(button);
+                    }, 1200);
+                    copyResetTimers.set(button, resetTimer);
                 });
             });
         </script>

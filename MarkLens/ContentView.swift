@@ -917,6 +917,13 @@ struct ContentView: View {
         previewFindCurrentIndex = 0
     }
 
+    private func resetPreviewNavigationState() {
+        isPreviewFindPresented = false
+        previewFindText = ""
+        previewFindMatchCount = 0
+        previewFindCurrentIndex = 0
+    }
+
     private var localAccessAlertPresented: Binding<Bool> {
 #if os(macOS)
         Binding(
@@ -1174,13 +1181,6 @@ struct ContentView: View {
         wikiResolutionWork?.cancel()
         wikiResolutionWork = nil
         isResolvingWikiLink = false
-    }
-
-    private func resetPreviewNavigationState() {
-        isPreviewFindPresented = false
-        previewFindText = ""
-        previewFindMatchCount = 0
-        previewFindCurrentIndex = 0
     }
 
     private func clearWikiLinkMatches() {

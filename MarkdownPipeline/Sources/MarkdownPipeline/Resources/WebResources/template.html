@@ -6,13 +6,32 @@
         {{STYLES}}
         <script>
             document.addEventListener('DOMContentLoaded', () => {
-                document.querySelectorAll('pre > code').forEach(code => {
-                    if (code.closest('[data-mermaid-diagram]')) {
-                        return;
-                    }
+                const codeBlocks = Array.from(document.querySelectorAll('pre > code'))
+                    .filter(code => !code.closest('[data-mermaid-diagram]'));
+                const canVirtualizeCodeBlocks =
+                    CSS.supports('content-visibility', 'auto') &&
+                    CSS.supports('contain-intrinsic-block-size', 'auto 1px') &&
+                    (codeBlocks.length >= 100 || codeBlocks.some(code => code.textContent.length >= 65536));
+
+                codeBlocks.forEach(code => {
                     const pre = code.parentElement;
                     const wrapper = document.createElement('div');
                     wrapper.className = 'code-block';
+                    if (canVirtualizeCodeBlocks) {
+                        let lineCount = 1;
+                        const text = code.textContent;
+                        for (let index = 0; index < text.length; index += 1) {
+                            if (text.charCodeAt(index) === 10) {
+                                lineCount += 1;
+                            }
+                        }
+                        const estimatedBlockSize = lineCount * 1.178125 + 0.8;
+                        wrapper.classList.add('code-block-virtualized');
+                        wrapper.style.setProperty(
+                            '--code-block-intrinsic-size',
+                            `${estimatedBlockSize.toFixed(4)}rem`
+                        );
+                    }
 
                     const button = document.createElement('button');
                     button.type = 'button';

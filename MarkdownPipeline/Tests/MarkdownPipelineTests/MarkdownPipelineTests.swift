@@ -62,6 +62,18 @@ struct FrontMatterTests {
     #expect(document.html.contains("href=\"#\""))
 }
 
+@Test func includesLargeDocumentCodeBlockVirtualization() throws {
+    let document = try MarkdownPipeline().render(
+        input: .string("```\ncode\n```"),
+        context: PipelineContext()
+    )
+
+    #expect(document.html.contains("code-block-virtualized"))
+    #expect(document.html.contains("content-visibility: auto"))
+    #expect(document.html.contains("contain-intrinsic-block-size: auto"))
+    #expect(document.html.contains("content-visibility: visible"))
+}
+
 @Suite("Code Highlighting Input Policy")
 struct CodeHighlightingInputPolicyTests {
     @Test func largeDocumentsDisableAutomaticHighlighting() {

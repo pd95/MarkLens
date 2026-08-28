@@ -102,6 +102,12 @@ pre {
     position: relative;
 }
 
+/* Skip layout and paint for distant code in unusually code-heavy documents. */
+.code-block-virtualized {
+    content-visibility: auto;
+    contain-intrinsic-block-size: auto var(--code-block-intrinsic-size, 4rem);
+}
+
 .copy-btn {
     position: absolute;
     top: -1rem;
@@ -393,6 +399,11 @@ img {
 
 /* Keep print overrides last so they win over the interactive code-block styles. */
 @media print {
+    .code-block-virtualized {
+        content-visibility: visible;
+        contain-intrinsic-block-size: none;
+    }
+
     .copy-btn {
         display: none;
     }

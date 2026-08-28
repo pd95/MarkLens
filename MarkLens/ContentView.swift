@@ -661,10 +661,17 @@ struct ContentView: View {
 #endif
 
     private func beginRawEditing() {
-        rawDraft = rawString()
-        sourceScrollTarget = previewScrollPosition
-        sourceScrollRequest += 1
-        isRawEditing = true
+        let source = rawString()
+        RawEditorPerformanceInstrumentation.event(
+            "EditModeRequested",
+            value: source.utf8.count
+        )
+        RawEditorPerformanceInstrumentation.measure("EditModeStatePreparation") {
+            rawDraft = source
+            sourceScrollTarget = previewScrollPosition
+            sourceScrollRequest += 1
+            isRawEditing = true
+        }
     }
 
     private func requestFinishRawEditing(commitChanges: Bool) {

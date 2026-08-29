@@ -8,35 +8,29 @@ struct SecuritySettingsView: View {
     private var loadsRemoteResources = false
     @AppStorage(SecurityPreferences.rendersMermaidKey)
     private var rendersMermaid = true
-    @AppStorage(SecurityPreferences.loadsLocalImagesKey)
-    private var loadsLocalImages = true
 
     var body: some View {
         Form {
-            Section("Document Content") {
-                Toggle("Render raw HTML", isOn: $rendersRawHTML)
+            Section("Content Safety") {
+                Toggle("Render HTML in Markdown documents", isOn: $rendersRawHTML)
                     .accessibilityIdentifier("rendersRawHTMLToggle")
-                Text("Allowed HTML is sanitized. Scripts, event handlers, forms, and embedded pages are always blocked.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-
-                Toggle("Load remote resources", isOn: $loadsRemoteResources)
-                    .accessibilityIdentifier("loadsRemoteResourcesToggle")
-                Text("Allows documents and custom CSS to load remote images, styles, and fonts. Links can still be opened when this is off.")
+                Text("Allows supported HTML formatting. Scripts, forms, embedded pages, and event handlers remain blocked.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
 
-            Section("Preview Rendering") {
-                Toggle("Render Mermaid diagrams", isOn: $rendersMermaid)
-                    .accessibilityIdentifier("rendersMermaidToggle")
-                Text("When disabled, Mermaid blocks are shown as source without loading the bundled browser renderer.")
+            Section("External Content") {
+                Toggle("Allow remote content", isOn: $loadsRemoteResources)
+                    .accessibilityIdentifier("loadsRemoteResourcesToggle")
+                Text("Opening a document may contact third-party servers to load images, styles, or fonts, revealing your IP address and when the document was opened. Links remain available when this is off.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
+            }
 
-                Toggle("Load local linked images", isOn: $loadsLocalImages)
-                    .accessibilityIdentifier("loadsLocalImagesToggle")
-                Text("Local images remain limited to supported files inside the document folder.")
+            Section("Enhanced Rendering") {
+                Toggle("Render Mermaid diagrams", isOn: $rendersMermaid)
+                    .accessibilityIdentifier("rendersMermaidToggle")
+                Text("Converts Mermaid code blocks into diagrams using code included with MarkLens. No network connection is required.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }

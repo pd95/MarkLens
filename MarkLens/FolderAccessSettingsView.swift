@@ -3,11 +3,21 @@ import SwiftUI
 #if os(macOS)
 struct FolderAccessSettingsView: View {
     @EnvironmentObject private var localDocumentAccess: LocalDocumentAccess
+    @AppStorage(SecurityPreferences.loadsLocalImagesKey)
+    private var loadsLocalImages = true
 
     var body: some View {
         Form {
+            Section("Linked Local Content") {
+                Toggle("Show linked images from this Mac", isOn: $loadsLocalImages)
+                    .accessibilityIdentifier("loadsLocalImagesToggle")
+                Text("Shows supported images linked from the document. MarkLens may ask for access to the document’s folder when an image needs it.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+
             Section("Files & Folders") {
-                Text("MarkLens uses these folders to load linked documents and local images.")
+                Text("MarkLens uses these folders to open linked documents and show local images.")
                     .foregroundStyle(.secondary)
 
                 if localDocumentAccess.authorizedFolders.isEmpty {
@@ -42,7 +52,7 @@ struct FolderAccessSettingsView: View {
             }
 
             Section {
-                Text("Documents previously opened in MarkLens may remain individually accessible through macOS after folder access is removed.")
+                Text("Removing folder access does not remove access to files you opened individually.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }

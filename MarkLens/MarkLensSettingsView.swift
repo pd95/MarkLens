@@ -9,14 +9,14 @@ struct MarkLensSettingsView: View {
                     Label("Appearance", systemImage: "paintbrush")
                 }
 
+            SecuritySettingsView()
+                .tabItem {
+                    Label("Content & Privacy", systemImage: "lock.shield")
+                }
+
             FolderAccessSettingsView()
                 .tabItem {
                     Label("Files & Folders", systemImage: "folder")
-                }
-
-            SecuritySettingsView()
-                .tabItem {
-                    Label("Security & Privacy", systemImage: "lock.shield")
                 }
 
             UpdateSettingsView()

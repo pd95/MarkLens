@@ -13,10 +13,10 @@ struct UpdateSettingsView: View {
 
     var body: some View {
         Form {
-            Section("Privacy") {
+            Section("Update Checking") {
                 Toggle("Automatically check for updates", isOn: $automaticChecks)
                     .accessibilityIdentifier("automaticUpdateChecksToggle")
-                Text("When enabled, MarkLens contacts GitHub at most once every seven days. Check Now remains available when this is disabled.")
+                Text("MarkLens connects to GitHub at most once every seven days to check for new releases. You can still check manually when this is off.")
                     .foregroundStyle(.secondary)
             }
 

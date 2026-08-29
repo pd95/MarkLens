@@ -1,6 +1,6 @@
 import Foundation
 
-public struct PipelineContext {
+public struct PipelineContext: Sendable {
     public enum RawHTMLPolicy: Sendable, Equatable {
         case escaped
         case sanitized
@@ -31,6 +31,7 @@ public struct PipelineContext {
     public var rawHTMLPolicy: RawHTMLPolicy
     public var allowsRemoteResources: Bool
     public var allowsLocalResources: Bool
+    public var allowsContentIDResources: Bool
 
     public init(
         title: String? = nil,
@@ -41,7 +42,8 @@ public struct PipelineContext {
         mermaidRendering: MermaidRendering = .rendered,
         rawHTMLPolicy: RawHTMLPolicy = .sanitized,
         allowsRemoteResources: Bool = true,
-        allowsLocalResources: Bool = true
+        allowsLocalResources: Bool = true,
+        allowsContentIDResources: Bool = false
     ) {
         self.title = title
         self.baseURL = baseURL
@@ -52,5 +54,6 @@ public struct PipelineContext {
         self.rawHTMLPolicy = rawHTMLPolicy
         self.allowsRemoteResources = allowsRemoteResources
         self.allowsLocalResources = allowsLocalResources
+        self.allowsContentIDResources = allowsContentIDResources
     }
 }

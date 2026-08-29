@@ -58,7 +58,8 @@ class PreviewProvider: QLPreviewProvider, QLPreviewingController {
             mermaidRendering: .sourceWithAppHint,
             rawHTMLPolicy: .escaped,
             allowsRemoteResources: false,
-            allowsLocalResources: false
+            allowsLocalResources: false,
+            allowsContentIDResources: true
         )
         return try Self.pipeline.renderHTML(from: .file(url), context: context)
     }

@@ -123,6 +123,23 @@ struct FrontMatterTests {
     #expect(document.html.contains("img-src data: marklens-resource: file:") == false)
 }
 
+@Test func contentIDPolicyAllowsOnlyQuickLookFontAttachments() throws {
+    let context = PipelineContext(
+        rawHTMLPolicy: .escaped,
+        allowsRemoteResources: false,
+        allowsLocalResources: false,
+        allowsContentIDResources: true
+    )
+    let document = try MarkdownPipeline().render(
+        input: .string(#"Math $x$"#),
+        context: context
+    )
+
+    #expect(document.html.contains("font-src data: marklens-resource: cid:"))
+    #expect(document.html.contains("img-src data: marklens-resource: cid:") == false)
+    #expect(document.html.components(separatedBy: "cid:").count - 1 == 1)
+}
+
 @Test func localImagePolicyDoesNotRemoveRawHTMLLinks() throws {
     let context = PipelineContext(
         rawHTMLPolicy: .sanitized,

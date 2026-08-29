@@ -46,12 +46,13 @@ struct HTMLEmitter {
     private func contentSecurityPolicy(nonce: String, policy: PipelineContext) -> String {
         let remote = policy.allowsRemoteResources ? " http: https:" : ""
         let localImages = policy.allowsLocalResources ? " marklens-local-image:" : ""
+        let contentID = policy.allowsContentIDResources ? " cid:" : ""
         return [
             "default-src 'none'",
             "script-src 'nonce-\(nonce)' marklens-resource:",
             "style-src 'unsafe-inline'\(remote)",
             "img-src data: marklens-resource:\(localImages)\(remote)",
-            "font-src data: marklens-resource:\(remote)",
+            "font-src data: marklens-resource:\(contentID)\(remote)",
             "connect-src 'none'",
             "media-src 'none'",
             "object-src 'none'",

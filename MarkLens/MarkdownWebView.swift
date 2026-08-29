@@ -103,8 +103,16 @@ struct MarkdownWebView: PlatformViewRepresentable {
         Coordinator(parent: self)
     }
 
+    static func makeSecureConfiguration() -> WKWebViewConfiguration {
+        let configuration = WKWebViewConfiguration()
+        configuration.websiteDataStore = .nonPersistent()
+        configuration.preferences.javaScriptCanOpenWindowsAutomatically = false
+        configuration.defaultWebpagePreferences.allowsContentJavaScript = true
+        return configuration
+    }
+
     func makeView(context: Context) -> WKWebView {
-        let config = WKWebViewConfiguration()
+        let config = Self.makeSecureConfiguration()
         let resourceHandler = HTMLResourceSchemeHandler()
         resourceHandler.update(resources: resources)
         config.setURLSchemeHandler(resourceHandler, forURLScheme: Self.resourceScheme)
@@ -145,6 +153,7 @@ struct MarkdownWebView: PlatformViewRepresentable {
 #if DEBUG && os(macOS)
         webView.isInspectable = true
 #endif
+        context.coordinator.authorizeInternalLoad()
         context.coordinator.beginWebViewLoad()
         webView.loadHTMLString(html, baseURL: baseURL)
 
@@ -238,6 +247,7 @@ struct MarkdownWebView: PlatformViewRepresentable {
         var latestScrollRequest = 0
         weak var reloadSnapshotView: PlatformImageView?
         var reloadGeneration = 0
+        private var isInternalLoadAuthorized = false
 #if canImport(os)
         private static let performanceLog = OSLog(
             subsystem: "ch.doapp.MarkLens",
@@ -264,6 +274,10 @@ struct MarkdownWebView: PlatformViewRepresentable {
                 signpostID: signpostID
             )
 #endif
+        }
+
+        fileprivate func authorizeInternalLoad() {
+            isInternalLoadAuthorized = true
         }
 
         fileprivate func endWebViewLoad() {
@@ -427,6 +441,7 @@ struct MarkdownWebView: PlatformViewRepresentable {
             let html = parent.html
             let baseURL = parent.baseURL
             guard animated, reloadAnimationsEnabled else {
+                authorizeInternalLoad()
                 beginWebViewLoad()
                 webView.loadHTMLString(html, baseURL: baseURL)
                 return
@@ -440,6 +455,7 @@ struct MarkdownWebView: PlatformViewRepresentable {
                 if let image {
                     self.installReloadSnapshot(image, over: webView)
                 }
+                self.authorizeInternalLoad()
                 self.beginWebViewLoad()
                 webView.loadHTMLString(html, baseURL: baseURL)
             }
@@ -832,9 +848,20 @@ struct MarkdownWebView: PlatformViewRepresentable {
 
         func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,
                      decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+            guard navigationAction.targetFrame?.isMainFrame != false else {
+                decisionHandler(.cancel)
+                return
+            }
+
+            if isInternalLoadAuthorized, navigationAction.navigationType == .other {
+                isInternalLoadAuthorized = false
+                decisionHandler(.allow)
+                return
+            }
+
             guard navigationAction.navigationType == .linkActivated,
                   let url = navigationAction.request.url else {
-                decisionHandler(.allow)
+                decisionHandler(.cancel)
                 return
             }
 

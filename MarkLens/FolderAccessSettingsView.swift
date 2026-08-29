@@ -1,6 +1,8 @@
 import SwiftUI
 
 #if os(macOS)
+import AppKit
+
 struct FolderAccessSettingsView: View {
     private static let linkedImagesExplanation =
         "Shows supported images linked from the document. MarkLens may ask for access to the document’s folder "
@@ -37,10 +39,19 @@ struct FolderAccessSettingsView: View {
                     .frame(maxWidth: .infinity, minHeight: 120)
                 } else {
                     List(localDocumentAccess.authorizedFolders, id: \.self) { folder in
+                        let isAvailable = LocalDocumentAccess.isFolderAvailable(folder)
                         HStack {
-                            Label(folder.path, systemImage: "folder")
+                            Label(LocalDocumentAccess.displayPath(for: folder), systemImage: "folder")
                                 .lineLimit(1)
                                 .truncationMode(.middle)
+                                .help(folder.path)
+
+                            if isAvailable == false {
+                                Label("Unavailable", systemImage: "exclamationmark.triangle.fill")
+                                    .font(.callout)
+                                    .foregroundStyle(.orange)
+                                    .help("This folder cannot be found. It may have been moved, renamed, or disconnected.")
+                            }
 
                             Spacer()
 
@@ -49,6 +60,18 @@ struct FolderAccessSettingsView: View {
                             }
                             .labelStyle(.iconOnly)
                             .help("Forget access to \(folder.lastPathComponent)")
+                        }
+                        .contextMenu {
+                            Button("Open in Finder", systemImage: "folder") {
+                                NSWorkspace.shared.open(folder)
+                            }
+                            .disabled(isAvailable == false)
+
+                            Divider()
+
+                            Button("Forget Access", systemImage: "trash", role: .destructive) {
+                                localDocumentAccess.revoke(folder: folder)
+                            }
                         }
                     }
                     .frame(minHeight: 140)

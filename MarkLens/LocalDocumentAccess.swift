@@ -1,5 +1,8 @@
 import Combine
 import Foundation
+#if canImport(Darwin)
+import Darwin
+#endif
 
 final class LocalDocumentAccess: ObservableObject {
 #if os(macOS)
@@ -163,4 +166,32 @@ final class LocalDocumentAccess: ObservableObject {
     init() {}
     func authorizedFolder(containing file: URL) -> URL? { nil }
 #endif
+
+    static func displayPath(for folder: URL, homeDirectory: URL? = nil) -> String {
+        let folderPath = folder.standardizedFileURL.path
+        let homePath = (homeDirectory ?? accountHomeDirectory).standardizedFileURL.path
+        if folderPath == homePath {
+            return "~"
+        }
+        let homePrefix = homePath.hasSuffix("/") ? homePath : homePath + "/"
+        guard folderPath.hasPrefix(homePrefix) else {
+            return folderPath
+        }
+        return "~/" + folderPath.dropFirst(homePrefix.count)
+    }
+
+    static func isFolderAvailable(_ folder: URL) -> Bool {
+        var isDirectory: ObjCBool = false
+        return FileManager.default.fileExists(atPath: folder.path, isDirectory: &isDirectory)
+            && isDirectory.boolValue
+    }
+
+    private static var accountHomeDirectory: URL {
+#if canImport(Darwin)
+        if let record = getpwuid(getuid()), let directory = record.pointee.pw_dir {
+            return URL(fileURLWithPath: String(cString: directory), isDirectory: true)
+        }
+#endif
+        return FileManager.default.homeDirectoryForCurrentUser
+    }
 }

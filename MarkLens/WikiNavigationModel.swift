@@ -2,7 +2,7 @@ import Combine
 import Foundation
 import MarkdownPipeline
 
-struct WikiPage: Equatable, Sendable {
+nonisolated struct WikiPage: Equatable, Sendable {
     let id: UUID
     let url: URL
     let html: String

@@ -17,7 +17,7 @@ enum SecurityPreferences {
     }
 }
 
-enum HTMLContentAdjustmentReason: Equatable, Sendable {
+nonisolated enum HTMLContentAdjustmentReason: Equatable, Sendable {
     case unsafeContentBlocked
     case renderingDisabled
 

@@ -17,11 +17,13 @@ struct SecuritySettingsView: View {
                 Toggle("Render raw HTML", isOn: $rendersRawHTML)
                     .accessibilityIdentifier("rendersRawHTMLToggle")
                 Text("Allowed HTML is sanitized. Scripts, event handlers, forms, and embedded pages are always blocked.")
+                    .font(.callout)
                     .foregroundStyle(.secondary)
 
                 Toggle("Load remote resources", isOn: $loadsRemoteResources)
                     .accessibilityIdentifier("loadsRemoteResourcesToggle")
                 Text("Allows documents and custom CSS to load remote images, styles, and fonts. Links can still be opened when this is off.")
+                    .font(.callout)
                     .foregroundStyle(.secondary)
             }
 
@@ -29,16 +31,23 @@ struct SecuritySettingsView: View {
                 Toggle("Render Mermaid diagrams", isOn: $rendersMermaid)
                     .accessibilityIdentifier("rendersMermaidToggle")
                 Text("When disabled, Mermaid blocks are shown as source without loading the bundled browser renderer.")
+                    .font(.callout)
                     .foregroundStyle(.secondary)
 
                 Toggle("Load local linked images", isOn: $loadsLocalImages)
                     .accessibilityIdentifier("loadsLocalImagesToggle")
                 Text("Local images remain limited to supported files inside the document folder.")
+                    .font(.callout)
                     .foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)
-        .padding()
+        .padding(.horizontal)
     }
+}
+
+#Preview {
+    SecuritySettingsView()
+        .frame(width: 600, height: 460)
 }
 #endif

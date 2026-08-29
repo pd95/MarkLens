@@ -276,7 +276,7 @@ struct MarkdownWebView: PlatformViewRepresentable {
 #endif
         }
 
-        fileprivate func authorizeInternalLoad() {
+        func authorizeInternalLoad() {
             isInternalLoadAuthorized = true
         }
 

@@ -6,11 +6,20 @@ struct UpdateSettingsView: View {
     @EnvironmentObject private var updateChecker: UpdateChecker
     @AppStorage(UpdatePreferences.includesPrereleasesKey)
     private var includesPrereleases = false
+    @AppStorage(UpdatePreferences.automaticChecksKey)
+    private var automaticChecks = true
     @State private var isChecking = false
     @State private var checkGeneration = 0
 
     var body: some View {
         Form {
+            Section("Privacy") {
+                Toggle("Automatically check for updates", isOn: $automaticChecks)
+                    .accessibilityIdentifier("automaticUpdateChecksToggle")
+                Text("When enabled, MarkLens contacts GitHub at most once every seven days. Check Now remains available when this is disabled.")
+                    .foregroundStyle(.secondary)
+            }
+
             Section("Release Channel") {
                 Picker("Channel", selection: updateChannel) {
                     ForEach(UpdateChannel.allCases) { channel in

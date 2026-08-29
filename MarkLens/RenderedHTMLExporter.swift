@@ -82,16 +82,25 @@ nonisolated struct RenderedHTMLExporter {
             options: .caseInsensitive
         )
         let escapedURL = NSRegularExpression.escapedPattern(for: sourceURL.absoluteString)
-        let pattern = "<script\\s+src=\"\(escapedURL)\"\\s*></script>"
+        let pattern = "<script\\b([^>]*)\\bsrc=\"\(escapedURL)\"([^>]*)>\\s*</script>"
         guard let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive) else {
             return html
         }
         let range = NSRange(html.startIndex..<html.endIndex, in: html)
-        return regex.stringByReplacingMatches(
-            in: html,
-            range: range,
-            withTemplate: "<script>\(NSRegularExpression.escapedTemplate(for: escapedScript))</script>"
-        )
+        var result = html
+        for match in regex.matches(in: html, range: range).reversed() {
+            guard let matchRange = Range(match.range, in: result),
+                  let leadingRange = Range(match.range(at: 1), in: result),
+                  let trailingRange = Range(match.range(at: 2), in: result) else { continue }
+            let attributeText = (String(result[leadingRange]) + String(result[trailingRange]))
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let attributes = attributeText.isEmpty ? "" : " \(attributeText)"
+            result.replaceSubrange(
+                matchRange,
+                with: "<script\(attributes)>\(escapedScript)</script>"
+            )
+        }
+        return result
     }
 
     private static func embeddingLocalImages(in html: String, relativeTo sourceURL: URL?) throws -> String {

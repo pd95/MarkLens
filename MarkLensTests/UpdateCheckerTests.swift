@@ -4,6 +4,32 @@ import XCTest
 
 @MainActor
 final class UpdateCheckerTests: XCTestCase {
+    func testAutomaticChecksCanBeDisabledWithoutDisablingManualChecks() async {
+        let defaults = makeDefaults()
+        defaults.set(false, forKey: UpdatePreferences.automaticChecksKey)
+        var requestCount = 0
+        let checker = UpdateChecker(
+            currentVersion: "1.0.0",
+            releaseTag: "v1.0.0",
+            defaults: defaults,
+            request: { _ in
+                requestCount += 1
+                return UpdateHTTPResponse(
+                    data: Self.releaseJSON(tag: "v2.0.0"),
+                    statusCode: 200,
+                    etag: nil
+                )
+            }
+        )
+
+        await checker.checkIfDue()
+        XCTAssertEqual(requestCount, 0)
+
+        let manualCheckSucceeded = await checker.checkNow()
+        XCTAssertTrue(manualCheckSucceeded)
+        XCTAssertEqual(requestCount, 1)
+    }
+
     func testVersionComparisonUsesNumericComponentsAndPrereleaseOrdering() throws {
         XCTAssertLessThan(try version("v1.9.0"), try version("1.10.0"))
         XCTAssertEqual(try version("1.2"), try version("1.2.0"))

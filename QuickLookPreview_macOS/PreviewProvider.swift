@@ -53,7 +53,13 @@ class PreviewProvider: QLPreviewProvider, QLPreviewingController {
     }
 
     private func renderHTML(for url: URL) throws -> HTMLDocument {
-        let context = PipelineContext(title: url.lastPathComponent)
+        let context = PipelineContext(
+            title: url.lastPathComponent,
+            mermaidRendering: .sourceWithAppHint,
+            rawHTMLPolicy: .escaped,
+            allowsRemoteResources: false,
+            allowsLocalResources: false
+        )
         return try Self.pipeline.renderHTML(from: .file(url), context: context)
     }
 }

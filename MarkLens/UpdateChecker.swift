@@ -183,7 +183,7 @@ final class UpdateChecker: ObservableObject {
     private static let etagKey = "updateChecker.etag"
 
     private let currentVersion: String
-    private let automaticChecksEnabled: Bool
+    private let automaticChecksAvailable: Bool
     private let manualChecksEnabled: Bool
     private let defaults: UserDefaults
     private let now: () -> Date
@@ -205,7 +205,7 @@ final class UpdateChecker: ObservableObject {
         let mockRelease: AvailableRelease? = nil
         #endif
         self.currentVersion = currentVersion == "local" ? BuildInfo.marketingVersion : currentVersion
-        self.automaticChecksEnabled = releaseTag != "local" && mockRelease == nil
+        self.automaticChecksAvailable = releaseTag != "local" && mockRelease == nil
         self.manualChecksEnabled = mockRelease == nil
         self.defaults = defaults
         self.now = now
@@ -232,7 +232,8 @@ final class UpdateChecker: ObservableObject {
     }
 
     func checkIfDue() async {
-        guard automaticChecksEnabled else {
+        guard automaticChecksAvailable,
+              Self.automaticChecksEnabled(in: defaults) else {
             return
         }
 
@@ -262,6 +263,13 @@ final class UpdateChecker: ObservableObject {
         if activeCheckID == checkID {
             activeCheck = nil
         }
+    }
+
+    private static func automaticChecksEnabled(in defaults: UserDefaults) -> Bool {
+        guard defaults.object(forKey: UpdatePreferences.automaticChecksKey) != nil else {
+            return true
+        }
+        return defaults.bool(forKey: UpdatePreferences.automaticChecksKey)
     }
 
     func checkNow() async -> Bool {

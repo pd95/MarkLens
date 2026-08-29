@@ -62,6 +62,47 @@ struct FrontMatterTests {
     #expect(document.html.contains("href=\"#\""))
 }
 
+@Test func sanitizesExecutableRawHTMLAttributesAndActiveTags() throws {
+    let input = """
+    <img src="missing" onerror="alert(1)">
+    <button onclick="alert(2)">Run</button>
+    <form action="https://example.com"><input name="secret"></form>
+    """
+    let document = try MarkdownPipeline().renderHTML(from: .string(input))
+
+    #expect(document.html.contains("onerror") == false)
+    #expect(document.html.contains("onclick") == false)
+    #expect(document.html.contains("&lt;button"))
+    #expect(document.html.contains("&lt;form"))
+    #expect(document.html.contains("&lt;input"))
+}
+
+@Test func canEscapeAllRawHTML() throws {
+    let context = PipelineContext(rawHTMLPolicy: .escaped)
+    let document = try MarkdownPipeline().render(input: .string("<span>Text</span>"), context: context)
+
+    #expect(document.html.contains("&lt;span&gt;Text&lt;/span&gt;"))
+    #expect(document.html.contains("<span>Text</span>") == false)
+}
+
+@Test func resourcePolicyBlocksRemoteAndLocalImagesButKeepsLinks() throws {
+    let context = PipelineContext(allowsRemoteResources: false, allowsLocalResources: false)
+    let input = """
+    [Remote link](https://example.com)
+    ![Remote](https://example.com/image.png)
+    ![Local](images/image.png)
+    <img src="https://example.com/raw.png">
+    """
+    let document = try MarkdownPipeline().render(input: .string(input), context: context)
+
+    #expect(document.html.contains("href=\"https://example.com\""))
+    #expect(document.html.contains("https://example.com/image.png") == false)
+    #expect(document.html.contains("images/image.png") == false)
+    #expect(document.html.contains("https://example.com/raw.png") == false)
+    #expect(document.html.contains("img-src data: marklens-resource:"))
+    #expect(document.html.contains("img-src data: marklens-resource: file:") == false)
+}
+
 @Test func includesLargeDocumentCodeBlockControlsAndVirtualization() throws {
     let document = try MarkdownPipeline().render(
         input: .string("```\ncode\n```"),

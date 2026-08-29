@@ -124,8 +124,16 @@ struct MarkdownPipelineConvenienceAPITests {
         let canonicalDocument = try canonical.renderHTML(from: .string(input))
         let reversedDocument = try reversed.renderHTML(from: .string(input))
 
-        #expect(canonicalDocument.html == reversedDocument.html)
+        #expect(removingSecurityNonces(from: canonicalDocument.html) == removingSecurityNonces(from: reversedDocument.html))
         #expect(canonicalDocument.containsWikiLinks == reversedDocument.containsWikiLinks)
+    }
+
+    private func removingSecurityNonces(from html: String) -> String {
+        html.replacingOccurrences(
+            of: #"[A-F0-9]{32}"#,
+            with: "NONCE",
+            options: .regularExpression
+        )
     }
 
     @Test func latestDuplicatePluginConfigurationWins() throws {

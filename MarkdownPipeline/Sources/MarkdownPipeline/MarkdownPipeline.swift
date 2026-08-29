@@ -50,7 +50,8 @@ public struct MarkdownPipeline: Sendable {
                 HTMLVisitor.render(
                     document: document,
                     sourceLineOffset: extraction.bodyLineOffset,
-                    plugins: coordinator
+                    plugins: coordinator,
+                    context: mergedContext
                 )
             }
             let contribution = try PipelineInstrumentation.measure("PluginAssets") {
@@ -63,7 +64,8 @@ public struct MarkdownPipeline: Sendable {
                     theme: mergedContext.theme,
                     additionalStyles: contribution.styles,
                     additionalScripts: contribution.scripts,
-                    overrideStyles: contribution.overrideStyles
+                    overrideStyles: contribution.overrideStyles,
+                    securityPolicy: mergedContext
                 )
             }
             return HTMLDocument(

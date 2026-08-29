@@ -31,35 +31,28 @@ struct HTMLVisitor: MarkupVisitor {
     var linkDepth = 0
     let sourceLineOffset: Int
     let plugins: HTMLPluginCoordinator
-
-    static let disallowedRawHTMLTags = [
-        "title",
-        "textarea",
-        "style",
-        "xmp",
-        "iframe",
-        "noembed",
-        "noframes",
-        "script",
-        "plaintext"
-    ]
+    let context: PipelineContext
 
     init(
         sourceLineOffset: Int = 0,
-        plugins: HTMLPluginCoordinator
+        plugins: HTMLPluginCoordinator,
+        context: PipelineContext
     ) {
         self.sourceLineOffset = sourceLineOffset
         self.plugins = plugins
+        self.context = context
     }
 
     static func render(
         document: Document,
         sourceLineOffset: Int = 0,
-        plugins: HTMLPluginCoordinator
+        plugins: HTMLPluginCoordinator,
+        context: PipelineContext
     ) -> RenderResult {
         var visitor = HTMLVisitor(
             sourceLineOffset: sourceLineOffset,
-            plugins: plugins
+            plugins: plugins,
+            context: context
         )
         let html = visitor.visit(document)
         return RenderResult(html: html)
@@ -283,32 +276,11 @@ struct HTMLVisitor: MarkupVisitor {
     }
 
     private func sanitizeRawHTML(_ rawHTML: String) -> String {
-        let tags = Self.disallowedRawHTMLTags.joined(separator: "|")
-        let pattern = "(?i)<\\s*/?\\s*(\(tags))\\b"
-        var result = rawHTML
-        if let markerRegex = try? Regex("(?i)\\s+data-marklens-local-image(?:\\s*=\\s*(?:\\\"[^\\\"]*\\\"|'[^']*'|[^\\s>]+))?") {
-            result = result.replacing(markerRegex, with: "")
-        }
-        if let sourceLineRegex = try? Regex("(?i)\\s+data-marklens-source-line(?:\\s*=\\s*(?:\\\"[^\\\"]*\\\"|'[^']*'|[^\\s>]+))?") {
-            result = result.replacing(sourceLineRegex, with: "")
-        }
-
-        guard let regex = try? Regex(pattern) else {
-            return result
-        }
-        let matches = result.matches(of: regex)
-        if matches.isEmpty {
-            return result
-        }
-
-        let offsets = matches.map { match in
-            result.distance(from: result.startIndex, to: match.range.lowerBound)
-        }
-        for offset in offsets.sorted(by: >) {
-            let index = result.index(result.startIndex, offsetBy: offset)
-            result.replaceSubrange(index...index, with: "&lt;")
-        }
-        return result
+        RawHTMLSanitizer(
+            policy: context.rawHTMLPolicy,
+            allowsRemoteResources: context.allowsRemoteResources,
+            allowsLocalResources: context.allowsLocalResources
+        ).sanitize(rawHTML)
     }
 
     mutating func visitTable(_ table: Table) -> String {
@@ -419,6 +391,19 @@ struct HTMLVisitor: MarkupVisitor {
 
         if raw.lowercased().hasPrefix("data:") {
             return isAllowedImageDataURI(raw) ? raw : fallback
+        }
+
+        if let scheme = urlScheme(from: raw) {
+            switch scheme.lowercased() {
+            case "http", "https":
+                guard context.allowsRemoteResources else { return fallback }
+            case "file":
+                guard context.allowsLocalResources else { return fallback }
+            default:
+                break
+            }
+        } else if context.allowsLocalResources == false {
+            return fallback
         }
 
         return sanitizedURL(raw, fallback: fallback)

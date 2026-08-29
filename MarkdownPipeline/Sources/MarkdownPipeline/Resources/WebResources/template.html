@@ -2,9 +2,10 @@
 <html lang="en" data-marklens-theme="{{THEME}}">
     <head>
         <meta charset="utf-8" />
+        <meta http-equiv="Content-Security-Policy" content="{{CONTENT_SECURITY_POLICY}}" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         {{STYLES}}
-        <script>
+        <script nonce="{{SCRIPT_NONCE}}">
             const codeControlTransitionDuration = window.matchMedia(
                 '(prefers-reduced-motion: reduce)'
             ).matches ? 0 : 180;

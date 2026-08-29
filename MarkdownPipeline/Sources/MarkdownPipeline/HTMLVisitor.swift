@@ -278,8 +278,7 @@ struct HTMLVisitor: MarkupVisitor {
     private func sanitizeRawHTML(_ rawHTML: String) -> String {
         RawHTMLSanitizer(
             policy: context.rawHTMLPolicy,
-            allowsRemoteResources: context.allowsRemoteResources,
-            allowsLocalResources: context.allowsLocalResources
+            allowsRemoteResources: context.allowsRemoteResources
         ).sanitize(rawHTML)
     }
 
@@ -372,28 +371,34 @@ struct HTMLVisitor: MarkupVisitor {
     }
 
     private func sanitizedURL(_ raw: String?, fallback: String) -> String {
-        guard let raw, raw.isEmpty == false else {
+        guard let raw,
+              let normalized = normalizedURL(raw),
+              normalized.isEmpty == false else {
             return fallback
         }
 
-        if let scheme = urlScheme(from: raw),
+        if let scheme = urlScheme(from: normalized),
            ["http", "https", "file"].contains(scheme.lowercased()) == false {
             return fallback
         }
 
-        return raw
+        return normalized
     }
 
     private func sanitizedImageURL(_ raw: String?, fallback: String) -> String {
-        guard let raw, raw.isEmpty == false else {
+        guard let raw,
+              let normalized = normalizedURL(raw),
+              normalized.isEmpty == false else {
             return fallback
         }
 
-        if raw.lowercased().hasPrefix("data:") {
-            return isAllowedImageDataURI(raw) ? raw : fallback
+        if normalized.lowercased().hasPrefix("data:") {
+            return isAllowedImageDataURI(normalized) ? normalized : fallback
         }
 
-        if let scheme = urlScheme(from: raw) {
+        if normalized.hasPrefix("//") {
+            guard context.allowsRemoteResources else { return fallback }
+        } else if let scheme = urlScheme(from: normalized) {
             switch scheme.lowercased() {
             case "http", "https":
                 guard context.allowsRemoteResources else { return fallback }
@@ -406,7 +411,25 @@ struct HTMLVisitor: MarkupVisitor {
             return fallback
         }
 
-        return sanitizedURL(raw, fallback: fallback)
+        return sanitizedURL(normalized, fallback: fallback)
+    }
+
+    private func normalizedURL(_ raw: String) -> String? {
+        var scalars = raw.unicodeScalars.filter { ![9, 10, 13].contains($0.value) }
+        while scalars.first?.value ?? 33 <= 32 { scalars.removeFirst() }
+        while scalars.last?.value ?? 33 <= 32 { scalars.removeLast() }
+        let normalized = String(String.UnicodeScalarView(scalars))
+        guard let colon = normalized.firstIndex(of: ":") else { return normalized }
+        if let terminator = normalized.firstIndex(where: { $0 == "/" || $0 == "?" || $0 == "#" }),
+           terminator < colon {
+            return normalized
+        }
+        let prefix = normalized[..<colon]
+        guard prefix.isEmpty == false,
+              prefix.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "+" || $0 == "-" || $0 == "." }) else {
+            return nil
+        }
+        return normalized
     }
 
     private func isAllowedImageDataURI(_ raw: String) -> Bool {

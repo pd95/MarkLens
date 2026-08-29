@@ -103,6 +103,57 @@ struct FrontMatterTests {
     #expect(document.html.contains("img-src data: marklens-resource: file:") == false)
 }
 
+@Test func rawHTMLCannotBypassLocalImageCapabilities() throws {
+    let context = PipelineContext(
+        rawHTMLPolicy: .sanitized,
+        allowsRemoteResources: false,
+        allowsLocalResources: true
+    )
+    let input = """
+    ![Markdown](images/allowed.png)
+    <img src="../outside.png">
+    <img src="file:///tmp/outside.png">
+    """
+    let document = try MarkdownPipeline().render(input: .string(input), context: context)
+
+    #expect(document.html.contains("data-marklens-local-image"))
+    #expect(document.html.contains("../outside.png") == false)
+    #expect(document.html.contains("file:///tmp/outside.png") == false)
+    #expect(document.html.contains("img-src data: marklens-resource: marklens-local-image:"))
+    #expect(document.html.contains("img-src data: marklens-resource: file:") == false)
+}
+
+@Test func localImagePolicyDoesNotRemoveRawHTMLLinks() throws {
+    let context = PipelineContext(
+        rawHTMLPolicy: .sanitized,
+        allowsRemoteResources: false,
+        allowsLocalResources: false
+    )
+    let input = #"<a href="other.md">Relative</a> <a href="file:///tmp/other.md">File</a>"#
+    let document = try MarkdownPipeline().render(input: .string(input), context: context)
+
+    #expect(document.html.contains("href=\"other.md\""))
+    #expect(document.html.contains("href=\"file:///tmp/other.md\""))
+}
+
+@Test func normalizesRawHTMLURLsBeforeSchemeValidation() throws {
+    let sanitizer = RawHTMLSanitizer(policy: .sanitized, allowsRemoteResources: false)
+    let html = """
+    <a href=" \tjava\nscript:alert(1)">Unsafe</a>
+    <a href="JaVaScRiPt:alert(2)">Unsafe</a>
+    <a href="java%73cript:alert(3)">Unsafe</a>
+    <a href=" other.md ">Safe</a>
+    <img src="//example.com/tracker.png">
+    """
+    let result = sanitizer.sanitize(html)
+
+    #expect(result.contains("javascript") == false)
+    #expect(result.contains("JaVaScRiPt") == false)
+    #expect(result.contains("java%73cript") == false)
+    #expect(result.contains("href=\"other.md\""))
+    #expect(result.contains("tracker.png") == false)
+}
+
 @Test func includesLargeDocumentCodeBlockControlsAndVirtualization() throws {
     let document = try MarkdownPipeline().render(
         input: .string("```\ncode\n```"),

@@ -19,7 +19,6 @@ struct RawHTMLSanitizer {
 
     let policy: PipelineContext.RawHTMLPolicy
     let allowsRemoteResources: Bool
-    let allowsLocalResources: Bool
 
     func sanitize(_ html: String) -> String {
         guard policy == .sanitized else { return html.encodedHTMLEntities() }
@@ -124,23 +123,48 @@ struct RawHTMLSanitizer {
             return classes.joined(separator: " ")
         }
         guard name == "href" || name == "src" else { return value }
-        guard let scheme = scheme(in: value) else {
-            return allowsLocalResources || value.hasPrefix("#") ? value : nil
+        let normalized = normalizedURL(value)
+        guard normalized.isEmpty == false else { return nil }
+        if normalized.hasPrefix("//") {
+            return name == "href" || allowsRemoteResources ? normalized : nil
+        }
+        guard let scheme = scheme(in: normalized) else {
+            if hasSchemeDelimiter(in: normalized) { return nil }
+            return name == "href" ? normalized : nil
         }
         switch scheme {
-        case "http", "https": return name == "href" || allowsRemoteResources ? value : nil
-        case "file": return allowsLocalResources ? value : nil
-        case "data": return tag == "img" && allowedImageDataURL(value) ? value : nil
+        case "http", "https": return name == "href" || allowsRemoteResources ? normalized : nil
+        case "file": return name == "href" ? normalized : nil
+        case "data": return tag == "img" && allowedImageDataURL(normalized) ? normalized : nil
         default: return nil
         }
     }
 
+    private func normalizedURL(_ value: String) -> String {
+        var scalars = value.unicodeScalars.filter { ![9, 10, 13].contains($0.value) }
+        while scalars.first?.value ?? 33 <= 32 { scalars.removeFirst() }
+        while scalars.last?.value ?? 33 <= 32 { scalars.removeLast() }
+        return String(String.UnicodeScalarView(scalars))
+    }
+
     private func scheme(in value: String) -> String? {
         guard let colon = value.firstIndex(of: ":") else { return nil }
+        if let terminator = value.firstIndex(where: { $0 == "/" || $0 == "?" || $0 == "#" }),
+           terminator < colon {
+            return nil
+        }
         let prefix = value[..<colon]
         guard prefix.isEmpty == false,
               prefix.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "+" || $0 == "-" || $0 == "." }) else { return nil }
         return prefix.lowercased()
+    }
+
+    private func hasSchemeDelimiter(in value: String) -> Bool {
+        guard let colon = value.firstIndex(of: ":") else { return false }
+        guard let terminator = value.firstIndex(where: { $0 == "/" || $0 == "?" || $0 == "#" }) else {
+            return true
+        }
+        return colon < terminator
     }
 
     private func allowedImageDataURL(_ value: String) -> Bool {

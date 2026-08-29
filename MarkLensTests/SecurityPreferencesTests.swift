@@ -50,6 +50,7 @@ final class SecurityPreferencesTests: XCTestCase {
 
         XCTAssertTrue(document.renderedHTML.contains("&lt;span"))
         XCTAssertFalse(document.renderedHTML.contains("https://example.com/image.png"))
+        XCTAssertEqual(document.htmlContentAdjustmentReason, .renderingDisabled)
 
         document.updateRenderingPreferences(RenderingPreferences(
             rendersRawHTML: true,
@@ -59,6 +60,7 @@ final class SecurityPreferencesTests: XCTestCase {
         XCTAssertTrue(document.renderedHTML.contains("<span class=\"note\">Raw</span>"))
         XCTAssertTrue(document.renderedHTML.contains("https://example.com/image.png"))
         XCTAssertEqual(document.filteredHTMLFragmentCount, 0)
+        XCTAssertNil(document.htmlContentAdjustmentReason)
         XCTAssertEqual(document.renderRevision, 1)
     }
 
@@ -72,5 +74,19 @@ final class SecurityPreferencesTests: XCTestCase {
 
         XCTAssertFalse(document.renderedHTML.contains("onclick"))
         XCTAssertGreaterThan(document.filteredHTMLFragmentCount, 0)
+        XCTAssertEqual(document.htmlContentAdjustmentReason, .unsafeContentBlocked)
+    }
+
+    func testHTMLAdjustmentPresentationDistinguishesDisabledAndUnsafeContent() {
+        XCTAssertEqual(HTMLContentAdjustmentReason.renderingDisabled.alertTitle, "HTML Not Rendered")
+        XCTAssertEqual(
+            HTMLContentAdjustmentReason.renderingDisabled.accessibilityLabel(fragmentCount: 2),
+            "HTML not rendered in 2 fragments"
+        )
+        XCTAssertEqual(HTMLContentAdjustmentReason.unsafeContentBlocked.alertTitle, "Unsafe HTML Blocked")
+        XCTAssertEqual(
+            HTMLContentAdjustmentReason.unsafeContentBlocked.accessibilityLabel(fragmentCount: 1),
+            "Unsafe HTML blocked in 1 fragment"
+        )
     }
 }

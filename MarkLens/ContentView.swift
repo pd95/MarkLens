@@ -251,12 +251,9 @@ struct ContentView: View {
                             Label(htmlFilteringToolbarLabel, systemImage: htmlFilteringToolbarIcon)
                         }
                         .buttonStyle(.bordered)
-                        .tint(rendersRawHTML ? .orange : .gray)
+                        .tint(displayedHTMLContentAdjustmentReason == .unsafeContentBlocked ? .orange : .gray)
                         .help(htmlFilteringToolbarHelp)
-                        .accessibilityLabel(
-                            "HTML filtered in \(displayedFilteredHTMLFragmentCount) "
-                                + (displayedFilteredHTMLFragmentCount == 1 ? "fragment" : "fragments")
-                        )
+                        .accessibilityLabel(htmlFilteringAccessibilityLabel)
                         .accessibilityIdentifier("htmlFilteredButton")
                     }
                 }
@@ -521,7 +518,7 @@ struct ContentView: View {
         } message: {
             Text("Choose which version to keep. Keeping your draft will replace the file on disk. Using the external version will discard your draft.")
         }
-        .alert("HTML Content Filtered", isPresented: $isHTMLFilteringInfoPresented) {
+        .alert(htmlFilteringAlertTitle, isPresented: $isHTMLFilteringInfoPresented) {
             Button("OK", role: .cancel) {}
         } message: {
             Text(htmlFilteringExplanation)
@@ -907,29 +904,34 @@ struct ContentView: View {
         wikiNavigation.currentPage?.filteredHTMLFragmentCount ?? document.filteredHTMLFragmentCount
     }
 
+    private var displayedHTMLContentAdjustmentReason: HTMLContentAdjustmentReason? {
+        wikiNavigation.currentPage?.htmlContentAdjustmentReason ?? document.htmlContentAdjustmentReason
+    }
+
     private var htmlFilteringExplanation: String {
-        let count = displayedFilteredHTMLFragmentCount
-        let fragments = count == 1 ? "one HTML fragment" : "\(count) HTML fragments"
-        if rendersRawHTML {
-            return "MarkLens blocked unsafe HTML in \(fragments). Unsafe elements or attributes were removed or "
-                + "displayed as text. The Markdown source was not changed."
-        }
-        return "MarkLens displayed HTML from \(fragments) as text because HTML rendering is turned off. "
-            + "The Markdown source was not changed."
+        displayedHTMLContentAdjustmentReason?.explanation(fragmentCount: displayedFilteredHTMLFragmentCount) ?? ""
     }
 
     private var htmlFilteringToolbarHelp: String {
-        rendersRawHTML
-            ? "Unsafe HTML was blocked."
-            : "HTML is being displayed as text because HTML rendering is turned off."
+        displayedHTMLContentAdjustmentReason?.toolbarHelp ?? ""
     }
 
     private var htmlFilteringToolbarLabel: String {
-        rendersRawHTML ? "Unsafe HTML Blocked" : "HTML Not Rendered"
+        displayedHTMLContentAdjustmentReason?.alertTitle ?? "HTML Content Adjusted"
     }
 
     private var htmlFilteringToolbarIcon: String {
-        rendersRawHTML ? "exclamationmark.shield.fill" : "doc.plaintext"
+        displayedHTMLContentAdjustmentReason?.toolbarIcon ?? "exclamationmark.shield"
+    }
+
+    private var htmlFilteringAlertTitle: String {
+        displayedHTMLContentAdjustmentReason?.alertTitle ?? "HTML Content Adjusted"
+    }
+
+    private var htmlFilteringAccessibilityLabel: String {
+        displayedHTMLContentAdjustmentReason?.accessibilityLabel(
+            fragmentCount: displayedFilteredHTMLFragmentCount
+        ) ?? "HTML content adjusted"
     }
 
     private var displayedContainsWikiLinks: Bool {

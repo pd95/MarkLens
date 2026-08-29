@@ -129,6 +129,41 @@ final class WikiNavigationModelTests: XCTestCase {
         XCTAssertFalse(model.canGoForward)
     }
 
+    func testReloadKeepsAdjustmentReasonFromDisplayedPageUntilReplacementSucceeds() async {
+        let root = URL(fileURLWithPath: "/wiki")
+        let pageURL = root.appendingPathComponent("page.md")
+        let model = WikiNavigationModel { url, root, preferences in
+            if preferences.rendersRawHTML {
+                Thread.sleep(forTimeInterval: 0.05)
+            }
+            let reason: HTMLContentAdjustmentReason = preferences.rendersRawHTML
+                ? .unsafeContentBlocked
+                : .renderingDisabled
+            return .success(WikiPage(
+                url: url,
+                html: "rendered",
+                resources: [],
+                containsWikiLinks: false,
+                filteredHTMLFragmentCount: 1,
+                htmlContentAdjustmentReason: reason,
+                displayPath: url.path.replacingOccurrences(of: root.path + "/", with: ""),
+                estimatedByteCount: 8
+            ))
+        }
+
+        model.navigate(to: pageURL, wikiRoot: root)
+        await waitForLoad(model)
+        XCTAssertEqual(model.currentPage?.htmlContentAdjustmentReason, .renderingDisabled)
+
+        model.reloadCurrent(renderingPreferences: RenderingPreferences(
+            rendersRawHTML: true,
+            loadsRemoteResources: false
+        ))
+        XCTAssertEqual(model.currentPage?.htmlContentAdjustmentReason, .renderingDisabled)
+        await waitForLoad(model)
+        XCTAssertEqual(model.currentPage?.htmlContentAdjustmentReason, .unsafeContentBlocked)
+    }
+
     private func makeModel(pageSize: Int = 128) -> WikiNavigationModel {
         WikiNavigationModel { url, root, _ in
             .success(Self.page(url: url, root: root, pageSize: pageSize))

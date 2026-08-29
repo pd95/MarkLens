@@ -180,7 +180,7 @@ final class LocalDocumentAccess: ObservableObject {
         return "~/" + folderPath.dropFirst(homePrefix.count)
     }
 
-    static func isFolderAvailable(_ folder: URL) -> Bool {
+    nonisolated static func isFolderAvailable(_ folder: URL) -> Bool {
         var isDirectory: ObjCBool = false
         return FileManager.default.fileExists(atPath: folder.path, isDirectory: &isDirectory)
             && isDirectory.boolValue

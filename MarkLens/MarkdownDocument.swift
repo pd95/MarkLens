@@ -21,6 +21,7 @@ final class MarkdownDocument: ReferenceFileDocument {
     @Published private(set) var renderedResources: [HTMLResource]
     @Published private(set) var containsWikiLinks: Bool
     @Published private(set) var filteredHTMLFragmentCount: Int
+    @Published private(set) var htmlContentAdjustmentReason: HTMLContentAdjustmentReason?
     @Published private(set) var renderRevision: Int
     let filename: String?
     private var renderingPreferences: RenderingPreferences
@@ -61,6 +62,7 @@ final class MarkdownDocument: ReferenceFileDocument {
         self.renderedResources = rendering.resources
         self.containsWikiLinks = rendering.containsWikiLinks
         self.filteredHTMLFragmentCount = rendering.filteredHTMLFragmentCount
+        self.htmlContentAdjustmentReason = rendering.htmlContentAdjustmentReason
         self.renderRevision = 0
     }
 
@@ -92,6 +94,7 @@ final class MarkdownDocument: ReferenceFileDocument {
         self.renderedResources = rendering.resources
         self.containsWikiLinks = rendering.containsWikiLinks
         self.filteredHTMLFragmentCount = rendering.filteredHTMLFragmentCount
+        self.htmlContentAdjustmentReason = rendering.htmlContentAdjustmentReason
         self.renderRevision = 0
     }
 
@@ -115,6 +118,7 @@ final class MarkdownDocument: ReferenceFileDocument {
         renderedResources = rendering.resources
         containsWikiLinks = rendering.containsWikiLinks
         filteredHTMLFragmentCount = rendering.filteredHTMLFragmentCount
+        htmlContentAdjustmentReason = rendering.htmlContentAdjustmentReason
         renderRevision += 1
     }
 
@@ -126,6 +130,7 @@ final class MarkdownDocument: ReferenceFileDocument {
         renderedResources = rendering.resources
         containsWikiLinks = rendering.containsWikiLinks
         filteredHTMLFragmentCount = rendering.filteredHTMLFragmentCount
+        htmlContentAdjustmentReason = rendering.htmlContentAdjustmentReason
         renderRevision += 1
     }
 
@@ -133,18 +138,28 @@ final class MarkdownDocument: ReferenceFileDocument {
         from markdown: String,
         title: String?,
         preferences: RenderingPreferences
-    ) -> (html: String, containsWikiLinks: Bool, resources: [HTMLResource], filteredHTMLFragmentCount: Int) {
+    ) -> (
+        html: String,
+        containsWikiLinks: Bool,
+        resources: [HTMLResource],
+        filteredHTMLFragmentCount: Int,
+        htmlContentAdjustmentReason: HTMLContentAdjustmentReason?
+    ) {
         DocumentPerformanceInstrumentation.measure("DocumentRender") {
             let context = preferences.pipelineContext(title: title)
             if let document = try? renderingPipeline.renderHTML(from: .string(markdown), context: context) {
+                let adjustmentReason = document.filteredHTMLFragmentCount > 0
+                    ? preferences.htmlContentAdjustmentReason
+                    : nil
                 return (
                     document.html,
                     document.containsWikiLinks,
                     document.resources,
-                    document.filteredHTMLFragmentCount
+                    document.filteredHTMLFragmentCount,
+                    adjustmentReason
                 )
             }
-            return (renderFailureHTML, false, [], 0)
+            return (renderFailureHTML, false, [], 0, nil)
         }
     }
 

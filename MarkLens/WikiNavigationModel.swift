@@ -9,6 +9,7 @@ struct WikiPage: Equatable, Sendable {
     let resources: [HTMLResource]
     let containsWikiLinks: Bool
     let filteredHTMLFragmentCount: Int
+    let htmlContentAdjustmentReason: HTMLContentAdjustmentReason?
     let displayPath: String
     let estimatedByteCount: Int
 
@@ -19,6 +20,7 @@ struct WikiPage: Equatable, Sendable {
         resources: [HTMLResource],
         containsWikiLinks: Bool,
         filteredHTMLFragmentCount: Int = 0,
+        htmlContentAdjustmentReason: HTMLContentAdjustmentReason? = nil,
         displayPath: String,
         estimatedByteCount: Int
     ) {
@@ -28,6 +30,7 @@ struct WikiPage: Equatable, Sendable {
         self.resources = resources
         self.containsWikiLinks = containsWikiLinks
         self.filteredHTMLFragmentCount = filteredHTMLFragmentCount
+        self.htmlContentAdjustmentReason = htmlContentAdjustmentReason
         self.displayPath = displayPath
         self.estimatedByteCount = estimatedByteCount
     }
@@ -273,6 +276,9 @@ enum WikiPageLoader {
                 resources: document.resources,
                 containsWikiLinks: document.containsWikiLinks,
                 filteredHTMLFragmentCount: document.filteredHTMLFragmentCount,
+                htmlContentAdjustmentReason: document.filteredHTMLFragmentCount > 0
+                    ? renderingPreferences.htmlContentAdjustmentReason
+                    : nil,
                 displayPath: WikiLinkResolver().relativePath(of: url, in: wikiRoot),
                 estimatedByteCount: document.html.utf8.count
             ))

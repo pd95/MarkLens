@@ -12,6 +12,8 @@ struct FolderAccessSettingsView: View {
     @AppStorage(SecurityPreferences.loadsLocalImagesKey)
     private var loadsLocalImages = true
     @State private var isForgetAllConfirmationPresented = false
+    @State private var folderAvailability: [URL: Bool] = [:]
+    @State private var availabilityRefreshGeneration = 0
 
     var body: some View {
         Form {
@@ -39,7 +41,7 @@ struct FolderAccessSettingsView: View {
                     .frame(maxWidth: .infinity, minHeight: 120)
                 } else {
                     List(localDocumentAccess.authorizedFolders, id: \.self) { folder in
-                        let isAvailable = LocalDocumentAccess.isFolderAvailable(folder)
+                        let isAvailable = folderAvailability[folder] ?? true
                         HStack {
                             Label(LocalDocumentAccess.displayPath(for: folder), systemImage: "folder")
                                 .lineLimit(1)
@@ -90,6 +92,14 @@ struct FolderAccessSettingsView: View {
         }
         .formStyle(.grouped)
         .padding(.horizontal)
+        .task(id: localDocumentAccess.accessRevision) {
+            await refreshFolderAvailability()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            Task {
+                await refreshFolderAvailability()
+            }
+        }
         .alert("Forget All Folder Access?", isPresented: $isForgetAllConfirmationPresented) {
             Button("Cancel", role: .cancel) {}
             Button("Forget All", role: .destructive) {
@@ -98,6 +108,19 @@ struct FolderAccessSettingsView: View {
         } message: {
             Text("MarkLens will ask for access again when a linked document or image needs one of these folders.")
         }
+    }
+
+    private func refreshFolderAvailability() async {
+        availabilityRefreshGeneration += 1
+        let generation = availabilityRefreshGeneration
+        let folders = localDocumentAccess.authorizedFolders
+        let availability = await Task.detached(priority: .utility) {
+            Dictionary(uniqueKeysWithValues: folders.map { folder in
+                (folder, LocalDocumentAccess.isFolderAvailable(folder))
+            })
+        }.value
+        guard Task.isCancelled == false, generation == availabilityRefreshGeneration else { return }
+        folderAvailability = availability
     }
 }
 

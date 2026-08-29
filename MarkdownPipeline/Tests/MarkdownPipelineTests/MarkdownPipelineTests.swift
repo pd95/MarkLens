@@ -171,6 +171,16 @@ struct FrontMatterTests {
     #expect(result.contains("tracker.png") == false)
 }
 
+@Test func malformedRawHTMLIsHandledInOneForwardPass() {
+    let sanitizer = RawHTMLSanitizer(policy: .sanitized, allowsRemoteResources: false)
+    let input = "<div>" + String(repeating: "<", count: 100_000)
+
+    let result = sanitizer.sanitize(input)
+
+    #expect(result.hasPrefix("<div>"))
+    #expect(result.components(separatedBy: "&lt;").count - 1 == 100_000)
+}
+
 @Test func includesLargeDocumentCodeBlockControlsAndVirtualization() throws {
     let document = try MarkdownPipeline().render(
         input: .string("```\ncode\n```"),

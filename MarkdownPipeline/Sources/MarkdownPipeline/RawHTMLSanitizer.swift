@@ -16,6 +16,9 @@ struct RawHTMLSanitizer {
         "code-expand-btn", "code-language-badge", "code-reveal-btn", "copy-btn", "hljs",
         "katex", "math", "mermaid-block", "mermaid-error", "mermaid-source",
     ]
+    private static let attributeRegex = try! NSRegularExpression(
+        pattern: #"(?i)([a-z_:][a-z0-9_.:-]*)(?:\s*=\s*(?:\"([^\"]*)\"|'([^']*)'|([^\s>]+)))?"#
+    )
 
     let policy: PipelineContext.RawHTMLPolicy
     let allowsRemoteResources: Bool
@@ -25,10 +28,14 @@ struct RawHTMLSanitizer {
         var output = ""
         var cursor = html.startIndex
         while cursor < html.endIndex {
-            guard html[cursor] == "<", let end = tagEnd(in: html, from: cursor) else {
+            guard html[cursor] == "<" else {
                 output.append(html[cursor])
                 cursor = html.index(after: cursor)
                 continue
+            }
+            guard let end = tagEnd(in: html, from: cursor) else {
+                output += String(html[cursor...]).encodedHTMLEntities()
+                break
             }
             let token = String(html[cursor...end])
             output += sanitizedTag(token) ?? escapedTagWithoutAttributes(token)
@@ -81,11 +88,9 @@ struct RawHTMLSanitizer {
     }
 
     private func parseAttributes(_ source: Substring, tag: String) -> String {
-        let pattern = #"(?i)([a-z_:][a-z0-9_.:-]*)(?:\s*=\s*(?:\"([^\"]*)\"|'([^']*)'|([^\s>]+)))?"#
-        guard let regex = try? NSRegularExpression(pattern: pattern) else { return "" }
         let text = String(source)
         let range = NSRange(text.startIndex..<text.endIndex, in: text)
-        return regex.matches(in: text, range: range).compactMap { match -> String? in
+        return Self.attributeRegex.matches(in: text, range: range).compactMap { match -> String? in
             guard let nameRange = Range(match.range(at: 1), in: text) else { return nil }
             let name = text[nameRange].lowercased()
             guard allowedAttribute(name, on: tag) else { return nil }

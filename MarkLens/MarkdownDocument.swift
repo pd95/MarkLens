@@ -20,6 +20,7 @@ final class MarkdownDocument: ReferenceFileDocument {
     @Published private(set) var renderedHTML: String
     @Published private(set) var renderedResources: [HTMLResource]
     @Published private(set) var containsWikiLinks: Bool
+    @Published private(set) var filteredHTMLFragmentCount: Int
     @Published private(set) var renderRevision: Int
     let filename: String?
     private var renderingPreferences: RenderingPreferences
@@ -59,6 +60,7 @@ final class MarkdownDocument: ReferenceFileDocument {
         self.renderedHTML = rendering.html
         self.renderedResources = rendering.resources
         self.containsWikiLinks = rendering.containsWikiLinks
+        self.filteredHTMLFragmentCount = rendering.filteredHTMLFragmentCount
         self.renderRevision = 0
     }
 
@@ -89,6 +91,7 @@ final class MarkdownDocument: ReferenceFileDocument {
         self.renderedHTML = rendering.html
         self.renderedResources = rendering.resources
         self.containsWikiLinks = rendering.containsWikiLinks
+        self.filteredHTMLFragmentCount = rendering.filteredHTMLFragmentCount
         self.renderRevision = 0
     }
 
@@ -111,6 +114,7 @@ final class MarkdownDocument: ReferenceFileDocument {
         renderedHTML = rendering.html
         renderedResources = rendering.resources
         containsWikiLinks = rendering.containsWikiLinks
+        filteredHTMLFragmentCount = rendering.filteredHTMLFragmentCount
         renderRevision += 1
     }
 
@@ -121,6 +125,7 @@ final class MarkdownDocument: ReferenceFileDocument {
         renderedHTML = rendering.html
         renderedResources = rendering.resources
         containsWikiLinks = rendering.containsWikiLinks
+        filteredHTMLFragmentCount = rendering.filteredHTMLFragmentCount
         renderRevision += 1
     }
 
@@ -128,13 +133,18 @@ final class MarkdownDocument: ReferenceFileDocument {
         from markdown: String,
         title: String?,
         preferences: RenderingPreferences
-    ) -> (html: String, containsWikiLinks: Bool, resources: [HTMLResource]) {
+    ) -> (html: String, containsWikiLinks: Bool, resources: [HTMLResource], filteredHTMLFragmentCount: Int) {
         DocumentPerformanceInstrumentation.measure("DocumentRender") {
             let context = preferences.pipelineContext(title: title)
             if let document = try? renderingPipeline.renderHTML(from: .string(markdown), context: context) {
-                return (document.html, document.containsWikiLinks, document.resources)
+                return (
+                    document.html,
+                    document.containsWikiLinks,
+                    document.resources,
+                    document.filteredHTMLFragmentCount
+                )
             }
-            return (renderFailureHTML, false, [])
+            return (renderFailureHTML, false, [], 0)
         }
     }
 

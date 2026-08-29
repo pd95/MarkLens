@@ -6,19 +6,22 @@ public struct HTMLDocument {
     public let baseURL: URL?
     public let containsWikiLinks: Bool
     public let resources: [HTMLResource]
+    public let filteredHTMLFragmentCount: Int
 
     public init(
         html: String,
         title: String?,
         baseURL: URL?,
         containsWikiLinks: Bool = false,
-        resources: [HTMLResource] = []
+        resources: [HTMLResource] = [],
+        filteredHTMLFragmentCount: Int = 0
     ) {
         self.html = html
         self.title = title
         self.baseURL = baseURL
         self.containsWikiLinks = containsWikiLinks
         self.resources = resources
+        self.filteredHTMLFragmentCount = filteredHTMLFragmentCount
     }
 
     @discardableResult

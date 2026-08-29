@@ -22,6 +22,7 @@ extension String {
 struct HTMLVisitor: MarkupVisitor {
     struct RenderResult {
         let html: String
+        let filteredHTMLFragmentCount: Int
     }
 
     var skipParagraphTags = false
@@ -29,6 +30,7 @@ struct HTMLVisitor: MarkupVisitor {
     var currentColumnIndex = 0
     var headingIDCounts: [String: Int] = [:]
     var linkDepth = 0
+    var filteredHTMLFragmentCount = 0
     let sourceLineOffset: Int
     let plugins: HTMLPluginCoordinator
     let context: PipelineContext
@@ -55,7 +57,10 @@ struct HTMLVisitor: MarkupVisitor {
             context: context
         )
         let html = visitor.visit(document)
-        return RenderResult(html: html)
+        return RenderResult(
+            html: html,
+            filteredHTMLFragmentCount: visitor.filteredHTMLFragmentCount
+        )
     }
 
     mutating func defaultVisit(_ markup: any Markup) -> String {
@@ -275,11 +280,15 @@ struct HTMLVisitor: MarkupVisitor {
         return sanitizeRawHTML(rawHTML)
     }
 
-    private func sanitizeRawHTML(_ rawHTML: String) -> String {
-        RawHTMLSanitizer(
+    private mutating func sanitizeRawHTML(_ rawHTML: String) -> String {
+        let result = RawHTMLSanitizer(
             policy: context.rawHTMLPolicy,
             allowsRemoteResources: context.allowsRemoteResources
-        ).sanitize(rawHTML)
+        ).sanitizeWithReport(rawHTML)
+        if result.didModify {
+            filteredHTMLFragmentCount += 1
+        }
+        return result.html
     }
 
     mutating func visitTable(_ table: Table) -> String {

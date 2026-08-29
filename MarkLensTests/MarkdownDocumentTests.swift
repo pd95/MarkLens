@@ -27,4 +27,13 @@ final class MarkdownDocumentTests: XCTestCase {
         XCTAssertEqual(Data(snapshot.utf8), Data(MarkdownDocument.starterText.utf8))
         XCTAssertTrue(MarkdownDocument.writableContentTypes.contains(.appMarkdown))
     }
+
+    func testPublishesWhetherHTMLWasFiltered() {
+        let document = MarkdownDocument(text: "<script>alert('unsafe')</script>")
+
+        XCTAssertGreaterThan(document.filteredHTMLFragmentCount, 0)
+
+        document.updateText("# Safe Markdown")
+        XCTAssertEqual(document.filteredHTMLFragmentCount, 0)
+    }
 }

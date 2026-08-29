@@ -65,6 +65,7 @@ struct ContentView: View {
     @State private var activeOutputOperationID: UUID?
     @State private var outputErrorTitle: String?
     @State private var outputErrorDescription: String?
+    @State private var isHTMLFilteringInfoPresented = false
     @State private var isRawEditing = false
     @State private var showFind = false
     @State private var rawDraft = ""
@@ -242,6 +243,22 @@ struct ContentView: View {
                     .disabled(isResolvingExternalChange)
                 }
             } else {
+                if displayedFilteredHTMLFragmentCount > 0 {
+                    ToolbarItem(placement: .primaryAction) {
+                        Button {
+                            isHTMLFilteringInfoPresented = true
+                        } label: {
+                            Label("HTML Filtered", systemImage: "exclamationmark.shield")
+                        }
+                        .help("Some HTML was adjusted or displayed as text for safety.")
+                        .accessibilityLabel(
+                            "HTML filtered in \(displayedFilteredHTMLFragmentCount) "
+                                + (displayedFilteredHTMLFragmentCount == 1 ? "fragment" : "fragments")
+                        )
+                        .accessibilityIdentifier("htmlFilteredButton")
+                    }
+                }
+
 #if os(macOS)
                 if wikiNavigation.hasBrowserHistory {
                     ToolbarItemGroup(placement: .navigation) {
@@ -417,6 +434,7 @@ struct ContentView: View {
 #if os(macOS)
             failedLocalImageURLs.removeAll()
 #endif
+            isHTMLFilteringInfoPresented = false
             resetPreviewNavigationState()
         }
         .onAppear {
@@ -500,6 +518,11 @@ struct ContentView: View {
             Button("Continue Editing", role: .cancel) {}
         } message: {
             Text("Choose which version to keep. Keeping your draft will replace the file on disk. Using the external version will discard your draft.")
+        }
+        .alert("HTML Content Filtered", isPresented: $isHTMLFilteringInfoPresented) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(htmlFilteringExplanation)
         }
 #if os(macOS)
         .sheet(
@@ -876,6 +899,17 @@ struct ContentView: View {
 
     private var displayedResources: [HTMLResource] {
         wikiNavigation.currentPage?.resources ?? document.renderedResources
+    }
+
+    private var displayedFilteredHTMLFragmentCount: Int {
+        wikiNavigation.currentPage?.filteredHTMLFragmentCount ?? document.filteredHTMLFragmentCount
+    }
+
+    private var htmlFilteringExplanation: String {
+        let count = displayedFilteredHTMLFragmentCount
+        let fragments = count == 1 ? "one HTML fragment" : "\(count) HTML fragments"
+        return "MarkLens adjusted or displayed \(fragments) as text based on your Content & Privacy settings. "
+            + "The Markdown source was not changed."
     }
 
     private var displayedContainsWikiLinks: Bool {

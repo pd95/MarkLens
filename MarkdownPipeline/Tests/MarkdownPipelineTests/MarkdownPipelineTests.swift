@@ -53,6 +53,7 @@ struct FrontMatterTests {
     let pipeline = MarkdownPipeline()
     let document = try pipeline.render(input: .string(input), context: PipelineContext())
     #expect(document.html.contains("&lt;script"))
+    #expect(document.filteredHTMLFragmentCount > 0)
 }
 
 @Test func sanitizesUnsafeLinks() throws {
@@ -83,6 +84,17 @@ struct FrontMatterTests {
 
     #expect(document.html.contains("&lt;span&gt;Text&lt;/span&gt;"))
     #expect(document.html.contains("<span>Text</span>") == false)
+    #expect(document.filteredHTMLFragmentCount > 0)
+}
+
+@Test func reportsOnlyRawHTMLThatWasChangedByFiltering() throws {
+    let safe = try MarkdownPipeline().renderHTML(from: .string("<span>Text</span>"))
+    let unsafe = try MarkdownPipeline().renderHTML(
+        from: .string("<span onclick=\"run()\">Text</span>")
+    )
+
+    #expect(safe.filteredHTMLFragmentCount == 0)
+    #expect(unsafe.filteredHTMLFragmentCount > 0)
 }
 
 @Test func resourcePolicyBlocksRemoteAndLocalImagesButKeepsLinks() throws {

@@ -73,7 +73,8 @@ public struct MarkdownPipeline: Sendable {
                 title: mergedContext.title,
                 baseURL: mergedContext.baseURL,
                 containsWikiLinks: contribution.containsWikiLinks,
-                resources: contribution.resources
+                resources: contribution.resources,
+                filteredHTMLFragmentCount: renderedBody.filteredHTMLFragmentCount
             )
         }
     }

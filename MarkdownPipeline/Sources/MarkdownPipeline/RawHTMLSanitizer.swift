@@ -1,6 +1,11 @@
 import Foundation
 
 struct RawHTMLSanitizer {
+    struct SanitizationResult {
+        let html: String
+        let didModify: Bool
+    }
+
     private static let allowedTags: Set<String> = [
         "a", "abbr", "b", "blockquote", "br", "caption", "cite", "code", "col", "colgroup",
         "dd", "del", "details", "div", "dl", "dt", "em", "figcaption", "figure", "h1", "h2",
@@ -24,7 +29,14 @@ struct RawHTMLSanitizer {
     let allowsRemoteResources: Bool
 
     func sanitize(_ html: String) -> String {
-        guard policy == .sanitized else { return html.encodedHTMLEntities() }
+        sanitizeWithReport(html).html
+    }
+
+    func sanitizeWithReport(_ html: String) -> SanitizationResult {
+        guard policy == .sanitized else {
+            let sanitized = html.encodedHTMLEntities()
+            return SanitizationResult(html: sanitized, didModify: sanitized != html)
+        }
         var output = ""
         var cursor = html.startIndex
         while cursor < html.endIndex {
@@ -41,7 +53,7 @@ struct RawHTMLSanitizer {
             output += sanitizedTag(token) ?? escapedTagWithoutAttributes(token)
             cursor = html.index(after: end)
         }
-        return output
+        return SanitizationResult(html: output, didModify: output != html)
     }
 
     private func escapedTagWithoutAttributes(_ token: String) -> String {

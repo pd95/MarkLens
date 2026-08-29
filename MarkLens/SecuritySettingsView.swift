@@ -2,6 +2,15 @@ import SwiftUI
 
 #if os(macOS)
 struct SecuritySettingsView: View {
+    private static let htmlExplanation =
+        "Allows supported HTML formatting. Scripts, forms, embedded pages, and event handlers remain blocked."
+    private static let remoteContentExplanation =
+        "Opening a document may contact third-party servers to load images, styles, or fonts, "
+        + "revealing your IP address and when the document was opened. Links remain available when this is off."
+    private static let mermaidExplanation =
+        "Converts Mermaid code blocks into diagrams using code included with MarkLens. "
+        + "No network connection is required."
+
     @AppStorage(SecurityPreferences.rendersRawHTMLKey)
     private var rendersRawHTML = false
     @AppStorage(SecurityPreferences.loadsRemoteResourcesKey)
@@ -14,25 +23,31 @@ struct SecuritySettingsView: View {
             Section("Content Safety") {
                 Toggle("Render HTML in Markdown documents", isOn: $rendersRawHTML)
                     .accessibilityIdentifier("rendersRawHTMLToggle")
-                Text("Allows supported HTML formatting. Scripts, forms, embedded pages, and event handlers remain blocked.")
+                    .accessibilityHint(Self.htmlExplanation)
+                Text(Self.htmlExplanation)
                     .font(.callout)
                     .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
             }
 
             Section("External Content") {
                 Toggle("Allow remote content", isOn: $loadsRemoteResources)
                     .accessibilityIdentifier("loadsRemoteResourcesToggle")
-                Text("Opening a document may contact third-party servers to load images, styles, or fonts, revealing your IP address and when the document was opened. Links remain available when this is off.")
+                    .accessibilityHint(Self.remoteContentExplanation)
+                Text(Self.remoteContentExplanation)
                     .font(.callout)
                     .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
             }
 
             Section("Enhanced Rendering") {
                 Toggle("Render Mermaid diagrams", isOn: $rendersMermaid)
                     .accessibilityIdentifier("rendersMermaidToggle")
-                Text("Converts Mermaid code blocks into diagrams using code included with MarkLens. No network connection is required.")
+                    .accessibilityHint(Self.mermaidExplanation)
+                Text(Self.mermaidExplanation)
                     .font(.callout)
                     .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
             }
         }
         .formStyle(.grouped)

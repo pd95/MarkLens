@@ -13,6 +13,7 @@ struct AppearanceSettingsView: View {
                     "Override MarkLens fonts, sizes, colors, and layout with CSS. "
                         + "Changes apply immediately to open previews."
                 )
+                    .font(.callout)
                     .foregroundStyle(.secondary)
 
                 TextEditor(text: $customCSS)
@@ -48,7 +49,7 @@ struct AppearanceSettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .padding()
+        .padding(.horizontal)
         .alert("Restore Starter Styles?", isPresented: $isRestoreConfirmationPresented) {
             Button("Cancel", role: .cancel) {}
             Button("Restore", role: .destructive) {

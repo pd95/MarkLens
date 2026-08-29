@@ -2,6 +2,10 @@ import SwiftUI
 
 #if os(macOS)
 struct UpdateSettingsView: View {
+    private static let automaticChecksExplanation =
+        "MarkLens connects to GitHub at most once every seven days to check for new releases. "
+        + "You can still check manually when this is off."
+
     @Environment(\.openURL) private var openURL
     @EnvironmentObject private var updateChecker: UpdateChecker
     @AppStorage(UpdatePreferences.includesPrereleasesKey)
@@ -16,8 +20,11 @@ struct UpdateSettingsView: View {
             Section("Update Checking") {
                 Toggle("Automatically check for updates", isOn: $automaticChecks)
                     .accessibilityIdentifier("automaticUpdateChecksToggle")
-                Text("MarkLens connects to GitHub at most once every seven days to check for new releases. You can still check manually when this is off.")
+                    .accessibilityHint(Self.automaticChecksExplanation)
+                Text(Self.automaticChecksExplanation)
+                    .font(.callout)
                     .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
             }
 
             Section("Release Channel") {
@@ -31,7 +38,9 @@ struct UpdateSettingsView: View {
                 .accessibilityHint(updateChannel.wrappedValue.explanation)
 
                 Text(updateChannel.wrappedValue.explanation)
+                    .font(.callout)
                     .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
             }
 
             Section {
@@ -79,7 +88,7 @@ struct UpdateSettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .padding()
+        .padding(.horizontal)
         .onChange(of: includesPrereleases) {
             checkGeneration += 1
             let generation = checkGeneration

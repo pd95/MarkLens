@@ -2,22 +2,30 @@ import SwiftUI
 
 #if os(macOS)
 struct FolderAccessSettingsView: View {
+    private static let linkedImagesExplanation =
+        "Shows supported images linked from the document. MarkLens may ask for access to the document’s folder "
+        + "when an image needs it."
+
     @EnvironmentObject private var localDocumentAccess: LocalDocumentAccess
     @AppStorage(SecurityPreferences.loadsLocalImagesKey)
     private var loadsLocalImages = true
+    @State private var isForgetAllConfirmationPresented = false
 
     var body: some View {
         Form {
             Section("Linked Local Content") {
                 Toggle("Show linked images from this Mac", isOn: $loadsLocalImages)
                     .accessibilityIdentifier("loadsLocalImagesToggle")
-                Text("Shows supported images linked from the document. MarkLens may ask for access to the document’s folder when an image needs it.")
+                    .accessibilityHint(Self.linkedImagesExplanation)
+                Text(Self.linkedImagesExplanation)
                     .font(.callout)
                     .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
             }
 
             Section("Files & Folders") {
                 Text("MarkLens uses these folders to open linked documents and show local images.")
+                    .font(.callout)
                     .foregroundStyle(.secondary)
 
                 if localDocumentAccess.authorizedFolders.isEmpty {
@@ -46,7 +54,7 @@ struct FolderAccessSettingsView: View {
                     .frame(minHeight: 140)
 
                     Button("Forget All Folder Access", role: .destructive) {
-                        localDocumentAccess.revokeAll()
+                        isForgetAllConfirmationPresented = true
                     }
                 }
             }
@@ -58,8 +66,15 @@ struct FolderAccessSettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .frame(width: 520, height: 360)
-        .padding()
+        .padding(.horizontal)
+        .alert("Forget All Folder Access?", isPresented: $isForgetAllConfirmationPresented) {
+            Button("Cancel", role: .cancel) {}
+            Button("Forget All", role: .destructive) {
+                localDocumentAccess.revokeAll()
+            }
+        } message: {
+            Text("MarkLens will ask for access again when a linked document or image needs one of these folders.")
+        }
     }
 }
 

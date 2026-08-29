@@ -58,6 +58,19 @@ final class SecurityPreferencesTests: XCTestCase {
 
         XCTAssertTrue(document.renderedHTML.contains("<span class=\"note\">Raw</span>"))
         XCTAssertTrue(document.renderedHTML.contains("https://example.com/image.png"))
+        XCTAssertEqual(document.filteredHTMLFragmentCount, 0)
         XCTAssertEqual(document.renderRevision, 1)
+    }
+
+    func testEnabledHTMLStillReportsUnsafePartsThatWereBlocked() {
+        let document = MarkdownDocument(text: "<span onclick=\"run()\">Unsafe</span>")
+
+        document.updateRenderingPreferences(RenderingPreferences(
+            rendersRawHTML: true,
+            loadsRemoteResources: false
+        ))
+
+        XCTAssertFalse(document.renderedHTML.contains("onclick"))
+        XCTAssertGreaterThan(document.filteredHTMLFragmentCount, 0)
     }
 }

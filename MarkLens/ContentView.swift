@@ -248,9 +248,11 @@ struct ContentView: View {
                         Button {
                             isHTMLFilteringInfoPresented = true
                         } label: {
-                            Label("HTML Filtered", systemImage: "exclamationmark.shield")
+                            Label(htmlFilteringToolbarLabel, systemImage: htmlFilteringToolbarIcon)
                         }
-                        .help("Some HTML was adjusted or displayed as text for safety.")
+                        .buttonStyle(.bordered)
+                        .tint(rendersRawHTML ? .orange : .gray)
+                        .help(htmlFilteringToolbarHelp)
                         .accessibilityLabel(
                             "HTML filtered in \(displayedFilteredHTMLFragmentCount) "
                                 + (displayedFilteredHTMLFragmentCount == 1 ? "fragment" : "fragments")
@@ -908,8 +910,26 @@ struct ContentView: View {
     private var htmlFilteringExplanation: String {
         let count = displayedFilteredHTMLFragmentCount
         let fragments = count == 1 ? "one HTML fragment" : "\(count) HTML fragments"
-        return "MarkLens adjusted or displayed \(fragments) as text based on your Content & Privacy settings. "
+        if rendersRawHTML {
+            return "MarkLens blocked unsafe HTML in \(fragments). Unsafe elements or attributes were removed or "
+                + "displayed as text. The Markdown source was not changed."
+        }
+        return "MarkLens displayed HTML from \(fragments) as text because HTML rendering is turned off. "
             + "The Markdown source was not changed."
+    }
+
+    private var htmlFilteringToolbarHelp: String {
+        rendersRawHTML
+            ? "Unsafe HTML was blocked."
+            : "HTML is being displayed as text because HTML rendering is turned off."
+    }
+
+    private var htmlFilteringToolbarLabel: String {
+        rendersRawHTML ? "Unsafe HTML Blocked" : "HTML Not Rendered"
+    }
+
+    private var htmlFilteringToolbarIcon: String {
+        rendersRawHTML ? "exclamationmark.shield.fill" : "doc.plaintext"
     }
 
     private var displayedContainsWikiLinks: Bool {

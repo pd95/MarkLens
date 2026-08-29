@@ -88,7 +88,7 @@ struct FrontMatterTests {
 }
 
 @Test func reportsOnlyRawHTMLThatWasChangedByFiltering() throws {
-    let safe = try MarkdownPipeline().renderHTML(from: .string("<span>Text</span>"))
+    let safe = try MarkdownPipeline().renderHTML(from: .string("<span class=note>Text</span>"))
     let unsafe = try MarkdownPipeline().renderHTML(
         from: .string("<span onclick=\"run()\">Text</span>")
     )

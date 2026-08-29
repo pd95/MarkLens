@@ -3,7 +3,7 @@ import Foundation
 struct RawHTMLSanitizer {
     struct SanitizationResult {
         let html: String
-        let didModify: Bool
+        let didFilter: Bool
     }
 
     private static let allowedTags: Set<String> = [
@@ -35,9 +35,10 @@ struct RawHTMLSanitizer {
     func sanitizeWithReport(_ html: String) -> SanitizationResult {
         guard policy == .sanitized else {
             let sanitized = html.encodedHTMLEntities()
-            return SanitizationResult(html: sanitized, didModify: sanitized != html)
+            return SanitizationResult(html: sanitized, didFilter: sanitized != html)
         }
         var output = ""
+        var didFilter = false
         var cursor = html.startIndex
         while cursor < html.endIndex {
             guard html[cursor] == "<" else {
@@ -47,13 +48,20 @@ struct RawHTMLSanitizer {
             }
             guard let end = tagEnd(in: html, from: cursor) else {
                 output += String(html[cursor...]).encodedHTMLEntities()
+                didFilter = true
                 break
             }
             let token = String(html[cursor...end])
-            output += sanitizedTag(token) ?? escapedTagWithoutAttributes(token)
+            if let sanitized = sanitizedTag(token) {
+                output += sanitized.html
+                didFilter = didFilter || sanitized.didFilter
+            } else {
+                output += escapedTagWithoutAttributes(token)
+                didFilter = true
+            }
             cursor = html.index(after: end)
         }
-        return SanitizationResult(html: output, didModify: output != html)
+        return SanitizationResult(html: output, didFilter: didFilter)
     }
 
     private func escapedTagWithoutAttributes(_ token: String) -> String {
@@ -84,7 +92,7 @@ struct RawHTMLSanitizer {
         return nil
     }
 
-    private func sanitizedTag(_ token: String) -> String? {
+    private func sanitizedTag(_ token: String) -> (html: String, didFilter: Bool)? {
         var body = token.dropFirst().dropLast()[...]
         body = body.drop(while: { $0.isWhitespace })
         let isClosing = body.first == "/"
@@ -93,27 +101,64 @@ struct RawHTMLSanitizer {
         guard nameEnd != body.startIndex else { return nil }
         let name = body[..<nameEnd].lowercased()
         guard Self.allowedTags.contains(name) else { return nil }
-        if isClosing { return "</\(name)>" }
+        if isClosing { return ("</\(name)>", false) }
 
         let selfClosing = body.drop(while: { $0.isWhitespace }).last == "/"
-        return "<\(name)\(parseAttributes(body[nameEnd...], tag: name))\(selfClosing ? " /" : "")>"
+        let attributes = parseAttributes(body[nameEnd...], tag: name)
+        return (
+            "<\(name)\(attributes.html)\(selfClosing ? " /" : "")>",
+            attributes.didFilter
+        )
     }
 
-    private func parseAttributes(_ source: Substring, tag: String) -> String {
+    private func parseAttributes(_ source: Substring, tag: String) -> (html: String, didFilter: Bool) {
         let text = String(source)
         let range = NSRange(text.startIndex..<text.endIndex, in: text)
-        return Self.attributeRegex.matches(in: text, range: range).compactMap { match -> String? in
-            guard let nameRange = Range(match.range(at: 1), in: text) else { return nil }
+        let matches = Self.attributeRegex.matches(in: text, range: range)
+        var didFilter = false
+        var previousEnd = 0
+        let attributes = matches.compactMap { match -> String? in
+            if containsUnexpectedAttributeSyntax(in: text, range: NSRange(
+                location: previousEnd,
+                length: match.range.location - previousEnd
+            )) {
+                didFilter = true
+            }
+            previousEnd = NSMaxRange(match.range)
+
+            guard let nameRange = Range(match.range(at: 1), in: text) else {
+                didFilter = true
+                return nil
+            }
             let name = text[nameRange].lowercased()
-            guard allowedAttribute(name, on: tag) else { return nil }
+            guard allowedAttribute(name, on: tag) else {
+                didFilter = true
+                return nil
+            }
             let value = (2...4).compactMap { index -> String? in
                 guard match.range(at: index).location != NSNotFound,
                       let valueRange = Range(match.range(at: index), in: text) else { return nil }
                 return String(text[valueRange])
             }.first ?? ""
-            guard let sanitized = sanitizedAttributeValue(value, name: name, tag: tag) else { return nil }
+            guard let sanitized = sanitizedAttributeValue(value, name: name, tag: tag) else {
+                didFilter = true
+                return nil
+            }
             return " \(name)=\"\(sanitized.encodedHTMLAttribute())\""
         }.joined()
+        if containsUnexpectedAttributeSyntax(in: text, range: NSRange(
+            location: previousEnd,
+            length: range.length - previousEnd
+        )) {
+            didFilter = true
+        }
+        return (attributes, didFilter)
+    }
+
+    private func containsUnexpectedAttributeSyntax(in text: String, range: NSRange) -> Bool {
+        guard range.length > 0 else { return false }
+        let fragment = (text as NSString).substring(with: range)
+        return fragment.contains { $0.isWhitespace == false && $0 != "/" }
     }
 
     private func allowedAttribute(_ name: String, on tag: String) -> Bool {

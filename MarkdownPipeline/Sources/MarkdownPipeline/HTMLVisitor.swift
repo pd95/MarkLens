@@ -285,7 +285,7 @@ struct HTMLVisitor: MarkupVisitor {
             policy: context.rawHTMLPolicy,
             allowsRemoteResources: context.allowsRemoteResources
         ).sanitizeWithReport(rawHTML)
-        if result.didModify {
+        if result.didFilter {
             filteredHTMLFragmentCount += 1
         }
         return result.html

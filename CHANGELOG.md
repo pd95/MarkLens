@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Clean up superseded release-candidate entries after a successful final GitHub Release upload while retaining their Git tags.
+
 ## 1.6.0
 
 - Improved reliability and responsiveness for very large Markdown documents by limiting syntax-highlighting work, virtualizing code-heavy previews, and using scalable native source editors on macOS and iOS.

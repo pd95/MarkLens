@@ -39,6 +39,11 @@ if [[ -z "${GITHUB_RELEASE_TOKEN:-}" ]]; then
     exit 1
 fi
 
+if ! command -v jq >/dev/null 2>&1; then
+    echo "error: jq is required to create and update GitHub Releases."
+    exit 1
+fi
+
 ARTIFACT_PATH="${CI_DEVELOPER_ID_SIGNED_APP_PATH:-}"
 if [[ -z "$ARTIFACT_PATH" || ! -e "$ARTIFACT_PATH" ]]; then
     echo "error: CI_DEVELOPER_ID_SIGNED_APP_PATH is empty or does not exist."
@@ -81,37 +86,30 @@ fi
 RELEASE_NAME="$APP_NAME $TAG_NAME"
 RELEASE_NOTES=""
 if [[ -f "$CHANGELOG_FILE" ]]; then
-    RELEASE_NOTES="$(python3 - "$CHANGELOG_FILE" "$BASE_VERSION" <<'PY'
-import re
-import sys
-
-path, version = sys.argv[1:]
-heading = re.compile(r"^##\s+\[?" + re.escape(version) + r"\]?\s*$")
-next_heading = re.compile(r"^##\s+")
-
-with open(path, encoding="utf-8") as handle:
-    lines = handle.readlines()
-
-start = None
-for index, line in enumerate(lines):
-    if heading.match(line.strip()):
-        start = index + 1
-        break
-
-if start is None:
-    sys.exit(0)
-
-end = len(lines)
-for index in range(start, len(lines)):
-    if next_heading.match(lines[index].strip()):
-        end = index
-        break
-
-notes = "".join(lines[start:end]).strip()
-if notes:
-    print(notes)
-PY
-)"
+    RELEASE_NOTES="$(awk -v version="$BASE_VERSION" '
+        /^##[[:space:]]+/ {
+            heading = $0
+            sub(/^##[[:space:]]+/, "", heading)
+            sub(/[[:space:]]+$/, "", heading)
+            if (substr(heading, 1, 1) == "[" && substr(heading, length(heading), 1) == "]") {
+                heading = substr(heading, 2, length(heading) - 2)
+            }
+            if (found) {
+                exit
+            }
+            if (heading == version) {
+                found = 1
+            }
+            next
+        }
+        found && !started && /^[[:space:]]*$/ {
+            next
+        }
+        found {
+            started = 1
+            print
+        }
+    ' "$CHANGELOG_FILE")"
 fi
 
 if [[ -z "$RELEASE_NOTES" ]]; then
@@ -140,26 +138,20 @@ http_code="$(curl --silent --show-error --location \
 
 if [[ "$http_code" == "404" ]]; then
     echo "Creating GitHub Release for $TAG_NAME"
-    python3 - "$WORK_DIR/create-release.json" "$TAG_NAME" "$RELEASE_NAME" "$RELEASE_NOTES" "$IS_PRERELEASE" <<'PY'
-import json
-import sys
-
-output_path, tag_name, name, body, prerelease = sys.argv[1:]
-is_prerelease = prerelease == "true"
-with open(output_path, "w", encoding="utf-8") as handle:
-    json.dump(
-        {
-            "tag_name": tag_name,
-            "name": name,
-            "body": body,
-            "draft": False,
-            "prerelease": is_prerelease,
-            "generate_release_notes": True,
-            "make_latest": "false" if is_prerelease else "true",
-        },
-        handle,
-    )
-PY
+    jq --null-input \
+        --arg tag_name "$TAG_NAME" \
+        --arg name "$RELEASE_NAME" \
+        --arg body "$RELEASE_NOTES" \
+        --argjson prerelease "$IS_PRERELEASE" \
+        '{
+            tag_name: $tag_name,
+            name: $name,
+            body: $body,
+            draft: false,
+            prerelease: $prerelease,
+            generate_release_notes: true,
+            make_latest: (if $prerelease then "false" else "true" end)
+        }' > "$WORK_DIR/create-release.json"
 
     http_code="$(curl --silent --show-error --location \
         --request POST \
@@ -175,21 +167,14 @@ fi
 
 if [[ "$http_code" -lt 200 || "$http_code" -gt 299 ]]; then
     echo "error: GitHub release lookup/create failed with HTTP $http_code"
-    python3 -m json.tool "$release_json" || cat "$release_json"
+    jq . "$release_json" || cat "$release_json"
     exit 1
 fi
 
-release_id="$(python3 - "$release_json" <<'PY'
-import json
-import sys
-
-with open(sys.argv[1], encoding="utf-8") as handle:
-    print(json.load(handle).get("id", ""))
-PY
-)"
+release_id="$(jq --raw-output 'if (.id | type) == "number" then .id else empty end' "$release_json")"
 if [[ -z "$release_id" || "$release_id" == "null" ]]; then
     echo "error: GitHub release response did not include an id."
-    python3 -m json.tool "$release_json" || cat "$release_json"
+    jq . "$release_json" || cat "$release_json"
     exit 1
 fi
 
@@ -205,23 +190,17 @@ http_code="$(curl --silent --show-error --location \
 
 if [[ "$http_code" -lt 200 || "$http_code" -gt 299 ]]; then
     echo "error: GitHub asset lookup failed with HTTP $http_code"
-    python3 -m json.tool "$assets_json" || cat "$assets_json"
+    jq . "$assets_json" || cat "$assets_json"
     exit 1
 fi
 
-existing_asset_id="$(python3 - "$assets_json" "$ASSET_NAME" <<'PY'
-import json
-import sys
-
-with open(sys.argv[1], encoding="utf-8") as handle:
-    assets = json.load(handle)
-
-for asset in assets:
-    if asset.get("name") == sys.argv[2]:
-        print(asset.get("id", ""))
-        break
-PY
-)"
+existing_asset_id="$(jq --raw-output --arg name "$ASSET_NAME" '
+    if type == "array" then
+        first(.[] | select(.name == $name) | .id) // empty
+    else
+        empty
+    end
+' "$assets_json")"
 if [[ -n "$existing_asset_id" ]]; then
     echo "Deleting existing release asset $ASSET_NAME"
     http_code="$(curl --silent --show-error --location \
@@ -255,16 +234,83 @@ http_code="$(curl --silent --show-error --location \
 
 if [[ "$http_code" -lt 200 || "$http_code" -gt 299 ]]; then
     echo "error: GitHub asset upload failed with HTTP $http_code"
-    python3 -m json.tool "$upload_json" || cat "$upload_json"
+    jq . "$upload_json" || cat "$upload_json"
     exit 1
 fi
 
-browser_download_url="$(python3 - "$upload_json" <<'PY'
-import json
-import sys
-
-with open(sys.argv[1], encoding="utf-8") as handle:
-    print(json.load(handle).get("browser_download_url", ""))
-PY
-)"
+browser_download_url="$(jq --raw-output '.browser_download_url // empty' "$upload_json")"
 echo "Uploaded GitHub Release asset: $browser_download_url"
+
+cleanup_release_candidates() {
+    local stable_tag="$1"
+    local candidates_file="$WORK_DIR/release-candidates.tsv"
+    local page=1
+    local page_size=100
+    local releases_json
+    local list_status
+    local release_count
+    local delete_status
+
+    : > "$candidates_file"
+    while true; do
+        releases_json="$WORK_DIR/releases-page-$page.json"
+        list_status="$(curl --silent --show-error --location \
+            --header "$accept_header" \
+            --header "$auth_header" \
+            --header "$api_version_header" \
+            --output "$releases_json" \
+            --write-out "%{http_code}" \
+            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/releases?per_page=$page_size&page=$page")"
+
+        if [[ "$list_status" -lt 200 || "$list_status" -gt 299 ]]; then
+            echo "error: GitHub release listing failed with HTTP $list_status"
+            jq . "$releases_json" || cat "$releases_json"
+            exit 1
+        fi
+
+        release_count="$(jq --exit-status '
+            if type == "array" then length else error("GitHub release listing was not an array") end
+        ' "$releases_json")"
+        jq --raw-output --arg prefix "$stable_tag-rc" '
+            .[]
+            | select(.draft == false and .prerelease == true)
+            | select((.id | type) == "number" and (.tag_name | type) == "string")
+            | select(.tag_name | startswith($prefix))
+            | select((.tag_name | ltrimstr($prefix)) | test("^[0-9]*$"))
+            | [.id, .tag_name]
+            | @tsv
+        ' "$releases_json" >> "$candidates_file"
+
+        if [[ "$release_count" -lt "$page_size" ]]; then
+            break
+        fi
+        (( page += 1 ))
+    done
+
+    if [[ ! -s "$candidates_file" ]]; then
+        echo "No published release candidates found for $stable_tag."
+        return
+    fi
+
+    while IFS=$'\t' read -r candidate_id candidate_tag; do
+        echo "Deleting superseded GitHub Release $candidate_tag (retaining its Git tag)"
+        delete_status="$(curl --silent --show-error --location \
+            --request DELETE \
+            --header "$accept_header" \
+            --header "$auth_header" \
+            --header "$api_version_header" \
+            --output "$release_status" \
+            --write-out "%{http_code}" \
+            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/releases/$candidate_id")"
+
+        if [[ "$delete_status" != "204" && "$delete_status" != "404" ]]; then
+            echo "error: GitHub Release deletion failed for $candidate_tag with HTTP $delete_status"
+            cat "$release_status"
+            exit 1
+        fi
+    done < "$candidates_file"
+}
+
+if [[ "$IS_PRERELEASE" == "false" ]]; then
+    cleanup_release_candidates "$TAG_NAME"
+fi

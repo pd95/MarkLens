@@ -24,6 +24,7 @@ struct MarkLensApp: App {
 
     init() {
         AppearancePreferences.registerDefaults()
+        SecurityPreferences.registerDefaults()
     }
 
     var body: some Scene {

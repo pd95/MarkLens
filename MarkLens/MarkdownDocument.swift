@@ -22,6 +22,7 @@ final class MarkdownDocument: ReferenceFileDocument {
     @Published private(set) var containsWikiLinks: Bool
     @Published private(set) var renderRevision: Int
     let filename: String?
+    private var renderingPreferences: RenderingPreferences
 
     private static let renderingPipeline = MarkdownPipeline(
         plugins: [.wikiLinks(), .syntaxHighlighting(), .math(), .mermaid(), .customCSS()]
@@ -53,7 +54,8 @@ final class MarkdownDocument: ReferenceFileDocument {
     init(text: String = "") {
         self.text = text
         self.filename = nil
-        let rendering = Self.renderHTML(from: text, title: nil)
+        self.renderingPreferences = .secureDefaults
+        let rendering = Self.renderHTML(from: text, title: nil, preferences: .secureDefaults)
         self.renderedHTML = rendering.html
         self.renderedResources = rendering.resources
         self.containsWikiLinks = rendering.containsWikiLinks
@@ -78,7 +80,12 @@ final class MarkdownDocument: ReferenceFileDocument {
         }
         self.text = text
         self.filename = configuration.file.preferredFilename
-        let rendering = Self.renderHTML(from: text, title: configuration.file.preferredFilename)
+        self.renderingPreferences = .secureDefaults
+        let rendering = Self.renderHTML(
+            from: text,
+            title: configuration.file.preferredFilename,
+            preferences: .secureDefaults
+        )
         self.renderedHTML = rendering.html
         self.renderedResources = rendering.resources
         self.containsWikiLinks = rendering.containsWikiLinks
@@ -100,7 +107,17 @@ final class MarkdownDocument: ReferenceFileDocument {
         }
 
         text = newText
-        let rendering = Self.renderHTML(from: newText, title: filename)
+        let rendering = Self.renderHTML(from: newText, title: filename, preferences: renderingPreferences)
+        renderedHTML = rendering.html
+        renderedResources = rendering.resources
+        containsWikiLinks = rendering.containsWikiLinks
+        renderRevision += 1
+    }
+
+    func updateRenderingPreferences(_ preferences: RenderingPreferences) {
+        guard renderingPreferences != preferences else { return }
+        renderingPreferences = preferences
+        let rendering = Self.renderHTML(from: text, title: filename, preferences: preferences)
         renderedHTML = rendering.html
         renderedResources = rendering.resources
         containsWikiLinks = rendering.containsWikiLinks
@@ -109,10 +126,11 @@ final class MarkdownDocument: ReferenceFileDocument {
 
     private static func renderHTML(
         from markdown: String,
-        title: String?
+        title: String?,
+        preferences: RenderingPreferences
     ) -> (html: String, containsWikiLinks: Bool, resources: [HTMLResource]) {
         DocumentPerformanceInstrumentation.measure("DocumentRender") {
-            let context = PipelineContext(title: title)
+            let context = preferences.pipelineContext(title: title)
             if let document = try? renderingPipeline.renderHTML(from: .string(markdown), context: context) {
                 return (document.html, document.containsWikiLinks, document.resources)
             }

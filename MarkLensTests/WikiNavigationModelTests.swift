@@ -35,7 +35,7 @@ final class WikiNavigationModelTests: XCTestCase {
         let root = URL(fileURLWithPath: "/wiki")
         let slow = root.appendingPathComponent("slow.md")
         let fast = root.appendingPathComponent("fast.md")
-        let model = WikiNavigationModel { url, root in
+        let model = WikiNavigationModel { url, root, _ in
             if url.lastPathComponent == "missing.md" {
                 return .failure("Missing")
             }
@@ -95,8 +95,42 @@ final class WikiNavigationModelTests: XCTestCase {
         XCTAssertNil(model.currentPage)
     }
 
+    func testReloadCurrentAppliesPreferencesAndInvalidatesHistory() async {
+        let root = URL(fileURLWithPath: "/wiki")
+        let first = root.appendingPathComponent("first.md")
+        let second = root.appendingPathComponent("second.md")
+        let model = WikiNavigationModel { url, root, preferences in
+            var page = Self.page(url: url, root: root)
+            page = WikiPage(
+                url: page.url,
+                html: preferences.loadsRemoteResources ? "remote-on" : "remote-off",
+                resources: page.resources,
+                containsWikiLinks: page.containsWikiLinks,
+                displayPath: page.displayPath,
+                estimatedByteCount: page.estimatedByteCount
+            )
+            return .success(page)
+        }
+
+        model.navigate(to: first, wikiRoot: root)
+        await waitForLoad(model)
+        model.navigate(to: second, wikiRoot: root)
+        await waitForLoad(model)
+        model.reloadCurrent(renderingPreferences: RenderingPreferences(
+            rendersRawHTML: false,
+            loadsRemoteResources: true
+        ))
+        await waitForLoad(model)
+
+        XCTAssertEqual(model.currentPage?.url, second)
+        XCTAssertEqual(model.currentPage?.html, "remote-on")
+        XCTAssertEqual(model.historyEntryCount, 1)
+        XCTAssertTrue(model.canGoBack)
+        XCTAssertFalse(model.canGoForward)
+    }
+
     private func makeModel(pageSize: Int = 128) -> WikiNavigationModel {
-        WikiNavigationModel { url, root in
+        WikiNavigationModel { url, root, _ in
             .success(Self.page(url: url, root: root, pageSize: pageSize))
         }
     }

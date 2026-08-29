@@ -57,7 +57,7 @@ final class WikiNavigationModel: ObservableObject {
     private var loadTask: Task<Void, Never>?
     private var pageLoadWork: Task<WikiPageLoadResult, Never>?
     private var pageCache: [URL: WikiPage] = [:]
-    private let loader: @Sendable (URL, URL) -> WikiPageLoadResult
+    private let loader: @Sendable (URL, URL, RenderingPreferences) -> WikiPageLoadResult
 
     private static let historyLimit = 20
     private static let historyByteLimit = 32 * 1_024 * 1_024
@@ -68,7 +68,7 @@ final class WikiNavigationModel: ObservableObject {
     var cachedPageCount: Int { pageCache.count }
     var cachedPageByteCount: Int { cachedHistoryByteCount }
 
-    init(loader: @escaping @Sendable (URL, URL) -> WikiPageLoadResult = WikiPageLoader.load) {
+    init(loader: @escaping @Sendable (URL, URL, RenderingPreferences) -> WikiPageLoadResult = WikiPageLoader.load) {
         self.loader = loader
     }
 
@@ -77,7 +77,11 @@ final class WikiNavigationModel: ObservableObject {
         pageLoadWork?.cancel()
     }
 
-    func navigate(to url: URL, wikiRoot: URL) {
+    func navigate(
+        to url: URL,
+        wikiRoot: URL,
+        renderingPreferences: RenderingPreferences = .secureDefaults
+    ) {
         navigationGeneration += 1
         let generation = navigationGeneration
         loadTask?.cancel()
@@ -88,7 +92,7 @@ final class WikiNavigationModel: ObservableObject {
         let loader = self.loader
         let pageLoadWork = Task.detached(priority: .userInitiated) {
             guard isCurrentTaskCancelled() == false else { return WikiPageLoadResult.cancelled }
-            return loader(url, wikiRoot)
+            return loader(url, wikiRoot, renderingPreferences)
         }
         self.pageLoadWork = pageLoadWork
         loadTask = Task { [weak self] in
@@ -110,6 +114,39 @@ final class WikiNavigationModel: ObservableObject {
                 self.pageCache[page.url] = page
                 self.trimHistory()
                 self.prunePageCache()
+                self.updateHistoryState()
+            case .failure(let description):
+                self.errorDescription = description
+            case .cancelled:
+                break
+            }
+        }
+    }
+
+    func reloadCurrent(renderingPreferences: RenderingPreferences) {
+        guard let currentPage, let wikiRootURL else { return }
+        navigationGeneration += 1
+        let generation = navigationGeneration
+        loadTask?.cancel()
+        pageLoadWork?.cancel()
+        isLoading = true
+        let loader = self.loader
+        let url = currentPage.url
+        let work = Task.detached(priority: .userInitiated) {
+            loader(url, wikiRootURL, renderingPreferences)
+        }
+        pageLoadWork = work
+        loadTask = Task { [weak self] in
+            let result = await work.value
+            guard let self, generation == self.navigationGeneration else { return }
+            self.isLoading = false
+            switch result {
+            case .success(let page):
+                self.current = .page(page.url)
+                self.currentPage = page
+                self.backStack = [.root]
+                self.forwardStack = []
+                self.pageCache = [page.url: page]
                 self.updateHistoryState()
             case .failure(let description):
                 self.errorDescription = description
@@ -217,10 +254,14 @@ enum WikiPageLoader {
         plugins: [.wikiLinks(), .syntaxHighlighting(), .math(), .mermaid(), .customCSS()]
     )
 
-    nonisolated static func load(url: URL, wikiRoot: URL) -> WikiPageLoadResult {
+    nonisolated static func load(
+        url: URL,
+        wikiRoot: URL,
+        renderingPreferences: RenderingPreferences
+    ) -> WikiPageLoadResult {
         guard isCurrentTaskCancelled() == false else { return .cancelled }
         do {
-            let context = PipelineContext(title: url.lastPathComponent)
+            let context = renderingPreferences.pipelineContext(title: url.lastPathComponent)
             let document = try pipeline.renderHTML(from: .file(url), context: context)
             guard isCurrentTaskCancelled() == false else { return .cancelled }
             return .success(WikiPage(

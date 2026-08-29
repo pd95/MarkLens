@@ -33,6 +33,10 @@ struct ContentView: View {
     @EnvironmentObject private var localDocumentAccess: LocalDocumentAccess
     @AppStorage(AppearancePreferences.customCSSKey)
     private var customCSS = AppearancePreferences.starterCSS
+    @AppStorage(SecurityPreferences.rendersRawHTMLKey)
+    private var rendersRawHTML = false
+    @AppStorage(SecurityPreferences.loadsRemoteResourcesKey)
+    private var loadsRemoteResources = false
     @ObservedObject var document: MarkdownDocument
     @StateObject private var wikiNavigation: WikiNavigationModel
     let fileURL: URL?
@@ -410,6 +414,12 @@ struct ContentView: View {
             failedLocalImageURLs.removeAll()
 #endif
             resetPreviewNavigationState()
+        }
+        .onAppear {
+            applyRenderingPreferences()
+        }
+        .onChange(of: renderingPreferences) {
+            applyRenderingPreferences()
         }
 #if os(macOS)
         .task {
@@ -842,6 +852,18 @@ struct ContentView: View {
         wikiNavigation.currentPage?.html ?? document.renderedHTML
     }
 
+    private var renderingPreferences: RenderingPreferences {
+        RenderingPreferences(
+            rendersRawHTML: rendersRawHTML,
+            loadsRemoteResources: loadsRemoteResources
+        )
+    }
+
+    private func applyRenderingPreferences() {
+        document.updateRenderingPreferences(renderingPreferences)
+        wikiNavigation.reloadCurrent(renderingPreferences: renderingPreferences)
+    }
+
     private var displayedURL: URL? {
         wikiNavigation.currentPage?.url ?? fileURL
     }
@@ -1160,7 +1182,11 @@ struct ContentView: View {
     }
 
     private func openResolvedWikiDocument(_ url: URL, wikiRoot: URL) {
-        wikiNavigation.navigate(to: url, wikiRoot: wikiRoot)
+        wikiNavigation.navigate(
+            to: url,
+            wikiRoot: wikiRoot,
+            renderingPreferences: renderingPreferences
+        )
     }
 
     private func activeWikiRoot(containing fileURL: URL) -> URL? {

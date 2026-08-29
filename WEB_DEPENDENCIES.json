@@ -20,10 +20,10 @@
     {
       "name": "Mermaid",
       "package": "mermaid",
-      "version": "11.15.0",
+      "version": "11.17.2",
       "license": "MIT",
       "source": "https://github.com/mermaid-js/mermaid",
-      "integrity": "sha512-pTMbcf3rWdtLiYGpmoTjHEpeY8seiy6sR+9nD7LOs8KfUbHE4lOUAprTRqRAcWSQ6MQpdX+YEsxShtGsINtPtw=="
+      "integrity": "sha512-V6K3C8EBdEsPFZXSKMJe6ppQOENxuHARr9GvHX4hh47lAbhMRD9qf4oEK7LoaRQxULMa80/qt5gHO73aCleBBg=="
     }
   ],
   "artifacts": [
@@ -125,7 +125,7 @@
     },
     {
       "path": "MarkdownPipeline/Sources/MarkdownPipeline/Resources/WebResources/mermaid.min.js",
-      "sha256": "70137e77bb273bb2ef972b86e8b0400cca8be53cb25bfc45911a186dc98665de"
+      "sha256": "581ed7d74bd9048d0e3a91363927d72ef22942d7722546b27f7cc29e35390eb8"
     },
     {
       "path": "MarkdownPipeline/Sources/MarkdownPipeline/Resources/WebResources/stackoverflow-dark.min.css",
@@ -137,11 +137,11 @@
     },
     {
       "path": "MarkdownPipeline/Sources/MarkdownPipeline/WebDependencyMetadata.generated.swift",
-      "sha256": "f2397334a02632fdb7e501f4fe308fbecd5a9f86dfbd04ed3e1f76abfcb5810c"
+      "sha256": "bbeab5dc20a17345b7ea8e43a29d85cba18123a6e7bbf273f27ecc199baa5c02"
     },
     {
       "path": "THIRD_PARTY_NOTICES",
-      "sha256": "0a11759993de0f3a47bde25b36da80161609c8dd7712c3ffea27290e48f8d433"
+      "sha256": "16802c682d3d0531fc7e6f67f8870d77d2f96eeb5a3c4ab753235cd90a28a430"
     }
   ]
 }

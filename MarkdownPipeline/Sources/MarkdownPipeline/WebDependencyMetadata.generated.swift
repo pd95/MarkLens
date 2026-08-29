@@ -3,7 +3,7 @@
 enum WebDependencyMetadata {
     static let highlightJSVersion = "11.11.1"
     static let kaTeXVersion = "0.17.0"
-    static let mermaidVersion = "11.15.0"
+    static let mermaidVersion = "11.17.2"
 
     static let kaTeXFontNames = [
         "KaTeX_AMS-Regular.woff2",

@@ -6,6 +6,7 @@
 - Added language badges and polished controls for code blocks, including collapsed previews, line-count reveal controls, persistent collapse actions, and accessible copy feedback.
 - Reduced preview work while scrolling and preserved source positions when switching between rendered and editing modes.
 - Fixed preview navigation state on iOS and resolved Swift concurrency warnings exposed by clean cross-platform builds.
+- Updated the bundled Mermaid renderer to 11.17.2 to incorporate upstream security fixes.
 
 ## 1.5.4
 

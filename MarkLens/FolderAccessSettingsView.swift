@@ -80,6 +80,7 @@ struct FolderAccessSettingsView: View {
 
 #Preview {
     FolderAccessSettingsView()
+        .frame(width: 600, height: 460)
         .environmentObject(LocalDocumentAccess())
 }
 #endif

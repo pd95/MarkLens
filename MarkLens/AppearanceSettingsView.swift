@@ -60,4 +60,9 @@ struct AppearanceSettingsView: View {
         }
     }
 }
+
+#Preview {
+    AppearanceSettingsView()
+        .frame(width: 600, height: 460)
+}
 #endif

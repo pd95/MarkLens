@@ -213,4 +213,10 @@ private enum UpdateChannel: CaseIterable, Identifiable {
         }
     }
 }
+
+#Preview {
+    UpdateSettingsView()
+        .frame(width: 600, height: 460)
+        .environmentObject(UpdateChecker())
+}
 #endif

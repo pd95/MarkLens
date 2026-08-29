@@ -731,6 +731,19 @@ struct MarkdownPipelineHTMLRenderingTests {
         #expect(document.resources.isEmpty)
     }
 
+    @Test func rendersPlainMermaidSourceWithoutBrowserAssets() throws {
+        let document = try MarkdownPipeline.defaultHTML().render(
+            input: .string("```mermaid\nflowchart LR\nA --> B\n```"),
+            context: PipelineContext(mermaidRendering: .source)
+        )
+
+        #expect(document.html.contains("flowchart LR"))
+        #expect(document.html.contains("Quick Look source") == false)
+        #expect(document.html.contains("<div class=\"mermaid-block\" data-mermaid-diagram>") == false)
+        #expect(document.html.contains("mermaid.initialize") == false)
+        #expect(document.resources.allSatisfy { $0.contentType != "application/javascript" })
+    }
+
     @Test func escapesMermaidSourceAndIncludesErrorFallbackMarkup() throws {
         let document = try MarkdownPipeline().render(
             input: .string("```mermaid\nflowchart LR\nA[</code><script>alert(1)</script>]\n```"),

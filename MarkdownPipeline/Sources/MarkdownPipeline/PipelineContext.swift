@@ -14,6 +14,7 @@ public struct PipelineContext {
 
     public enum MermaidRendering: Sendable, Equatable {
         case rendered
+        case source
         case sourceWithAppHint
     }
 

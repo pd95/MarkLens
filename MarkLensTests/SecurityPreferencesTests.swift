@@ -1,4 +1,5 @@
 import XCTest
+import MarkdownPipeline
 @testable import MarkLens
 
 @MainActor
@@ -12,6 +13,33 @@ final class SecurityPreferencesTests: XCTestCase {
 
         XCTAssertFalse(defaults.bool(forKey: SecurityPreferences.rendersRawHTMLKey))
         XCTAssertFalse(defaults.bool(forKey: SecurityPreferences.loadsRemoteResourcesKey))
+        XCTAssertTrue(defaults.bool(forKey: SecurityPreferences.rendersMermaidKey))
+        XCTAssertTrue(defaults.bool(forKey: SecurityPreferences.loadsLocalImagesKey))
+    }
+
+    func testDocumentCanDisableMermaidAndLocalImages() {
+        let document = MarkdownDocument(text: """
+        ![Local](images/example.png)
+
+        ```mermaid
+        flowchart LR
+            A --> B
+        ```
+        """)
+
+        document.updateRenderingPreferences(RenderingPreferences(
+            rendersRawHTML: false,
+            loadsRemoteResources: false,
+            rendersMermaid: false,
+            loadsLocalImages: false
+        ))
+
+        XCTAssertFalse(document.renderedHTML.contains("data-marklens-local-image"))
+        XCTAssertFalse(document.renderedHTML.contains("images/example.png"))
+        XCTAssertFalse(document.renderedHTML.contains("<div class=\"mermaid-block\" data-mermaid-diagram>"))
+        XCTAssertFalse(document.renderedHTML.contains("mermaid.initialize"))
+        XCTAssertTrue(document.renderedHTML.contains("flowchart LR"))
+        XCTAssertTrue(document.renderedResources.allSatisfy { $0.contentType != "application/javascript" })
     }
 
     func testDocumentRerendersWhenContentPolicyChanges() {

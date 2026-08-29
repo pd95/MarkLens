@@ -6,6 +6,10 @@ struct SecuritySettingsView: View {
     private var rendersRawHTML = false
     @AppStorage(SecurityPreferences.loadsRemoteResourcesKey)
     private var loadsRemoteResources = false
+    @AppStorage(SecurityPreferences.rendersMermaidKey)
+    private var rendersMermaid = true
+    @AppStorage(SecurityPreferences.loadsLocalImagesKey)
+    private var loadsLocalImages = true
 
     var body: some View {
         Form {
@@ -18,6 +22,18 @@ struct SecuritySettingsView: View {
                 Toggle("Load remote resources", isOn: $loadsRemoteResources)
                     .accessibilityIdentifier("loadsRemoteResourcesToggle")
                 Text("Allows documents and custom CSS to load remote images, styles, and fonts. Links can still be opened when this is off.")
+                    .foregroundStyle(.secondary)
+            }
+
+            Section("Preview Rendering") {
+                Toggle("Render Mermaid diagrams", isOn: $rendersMermaid)
+                    .accessibilityIdentifier("rendersMermaidToggle")
+                Text("When disabled, Mermaid blocks are shown as source without loading the bundled browser renderer.")
+                    .foregroundStyle(.secondary)
+
+                Toggle("Load local linked images", isOn: $loadsLocalImages)
+                    .accessibilityIdentifier("loadsLocalImagesToggle")
+                Text("Local images remain limited to supported files inside the document folder.")
                     .foregroundStyle(.secondary)
             }
         }

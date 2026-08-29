@@ -37,6 +37,10 @@ struct ContentView: View {
     private var rendersRawHTML = false
     @AppStorage(SecurityPreferences.loadsRemoteResourcesKey)
     private var loadsRemoteResources = false
+    @AppStorage(SecurityPreferences.rendersMermaidKey)
+    private var rendersMermaid = true
+    @AppStorage(SecurityPreferences.loadsLocalImagesKey)
+    private var loadsLocalImages = true
     @ObservedObject var document: MarkdownDocument
     @StateObject private var wikiNavigation: WikiNavigationModel
     let fileURL: URL?
@@ -855,7 +859,9 @@ struct ContentView: View {
     private var renderingPreferences: RenderingPreferences {
         RenderingPreferences(
             rendersRawHTML: rendersRawHTML,
-            loadsRemoteResources: loadsRemoteResources
+            loadsRemoteResources: loadsRemoteResources,
+            rendersMermaid: rendersMermaid,
+            loadsLocalImages: loadsLocalImages
         )
     }
 

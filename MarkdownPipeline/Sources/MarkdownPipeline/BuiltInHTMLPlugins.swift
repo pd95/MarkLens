@@ -217,6 +217,12 @@ private final class MermaidHTMLPluginSession: HTMLRenderingPluginSession {
             <p class="mermaid-error" role="status" hidden>Could not render Mermaid diagram. Showing source.</p>
             </div>
             """ + "\n"
+        case .source:
+            return """
+            <div class="mermaid-block mermaid-source-fallback">
+            <pre class="mermaid-source"><code class="lang-plaintext">\(source)\n</code></pre>
+            </div>
+            """ + "\n"
         case .sourceWithAppHint:
             return """
             <div class="mermaid-block mermaid-source-fallback">

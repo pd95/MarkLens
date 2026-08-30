@@ -524,20 +524,8 @@ struct ContentView: View {
             Text(htmlFilteringExplanation)
         }
 #if os(macOS)
-        .sheet(
-            isPresented: Binding(
-                get: { wikiLinkMatches.isEmpty == false },
-                set: { if $0 == false { clearWikiLinkMatches() } }
-            )
-        ) {
-            if let root = wikiLinkMatchesRoot {
-                WikiLinkMatchChooser(matches: wikiLinkMatches, root: root) { url in
-                    clearWikiLinkMatches()
-                    openResolvedWikiDocument(url, wikiRoot: root)
-                }
-            } else {
-                EmptyView()
-            }
+        .sheet(isPresented: wikiLinkMatchChooserPresented) {
+            wikiLinkMatchChooser
         }
 #endif
 #if os(macOS)
@@ -562,6 +550,29 @@ struct ContentView: View {
     }
 
 #if os(macOS)
+    private var wikiLinkMatchChooserPresented: Binding<Bool> {
+        Binding(
+            get: { wikiLinkMatches.isEmpty == false },
+            set: { isPresented in
+                if isPresented == false {
+                    clearWikiLinkMatches()
+                }
+            }
+        )
+    }
+
+    @ViewBuilder
+    private var wikiLinkMatchChooser: some View {
+        if let root = wikiLinkMatchesRoot {
+            WikiLinkMatchChooser(matches: wikiLinkMatches, root: root) { url in
+                clearWikiLinkMatches()
+                openResolvedWikiDocument(url, wikiRoot: root)
+            }
+        } else {
+            EmptyView()
+        }
+    }
+
     private var canProduceRenderedOutput: Bool {
         isRawEditing == false && isWikiNavigationLoading == false && activeOutputOperationID == nil
     }

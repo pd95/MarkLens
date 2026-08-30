@@ -1,8 +1,13 @@
 # Changelog
 
-## Unreleased
+## 1.7.0
 
-- Clean up superseded release-candidate entries after a successful final GitHub Release upload while retaining their Git tags.
+- Added Security & Privacy controls for raw HTML, remote resources, Mermaid diagrams, linked local images, and automatic update checks, with safer defaults for untrusted document content.
+- Hardened rendered previews with raw HTML sanitization, a nonce-based content security policy, ephemeral browser data, and stricter navigation and resource-loading boundaries.
+- Made Quick Look previews network-free and escaped raw HTML while retaining bundled fonts and readable Mermaid source.
+- Added in-preview alerts when HTML is disabled or unsafe fragments are filtered, without changing the Markdown source.
+- Improved authorized-folder management with availability status, compact paths, Finder access, per-folder revocation, and confirmation before forgetting all folders.
+- Improved release automation by removing superseded release-candidate entries after a successful final upload while retaining their Git tags.
 
 ## 1.6.0
 

@@ -122,6 +122,8 @@ struct AvailableRelease: Codable, Equatable {
     let body: String
     let htmlURL: URL
     let prerelease: Bool
+    let changelog: String?
+    let downloadURL: URL?
 
     private enum CodingKeys: String, CodingKey {
         case tagName
@@ -129,14 +131,26 @@ struct AvailableRelease: Codable, Equatable {
         case body
         case htmlURL
         case prerelease
+        case changelog
+        case downloadURL
     }
 
-    init(tagName: String, name: String?, body: String, htmlURL: URL, prerelease: Bool) {
+    init(
+        tagName: String,
+        name: String?,
+        body: String,
+        htmlURL: URL,
+        prerelease: Bool,
+        changelog: String? = nil,
+        downloadURL: URL? = nil
+    ) {
         self.tagName = tagName
         self.name = name
         self.body = body
         self.htmlURL = htmlURL
         self.prerelease = prerelease
+        self.changelog = changelog
+        self.downloadURL = downloadURL
     }
 
     init(from decoder: Decoder) throws {
@@ -148,10 +162,42 @@ struct AvailableRelease: Codable, Equatable {
         prerelease = try container.decodeIfPresent(Bool.self, forKey: .prerelease)
             ?? ReleaseVersion(tagName)?.isPrerelease
             ?? false
+        changelog = try container.decodeIfPresent(String.self, forKey: .changelog)
+        downloadURL = try container.decodeIfPresent(URL.self, forKey: .downloadURL)
     }
 
     var displayVersion: String {
         tagName.first?.lowercased() == "v" ? String(tagName.dropFirst()) : tagName
+    }
+
+    func releaseNotes(since installedVersion: String) -> String {
+        if let changelog,
+           let missedChanges = ReleaseChangelog.missedChanges(
+               in: changelog,
+               installedVersion: installedVersion,
+               releaseTag: tagName
+           ) {
+            return missedChanges
+        }
+
+        let trimmedBody = body.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmedBody.isEmpty ? "Release notes are unavailable." : trimmedBody
+    }
+
+    func releaseNotesContentIdentity(since installedVersion: String) -> String {
+        "\(tagName)\n\(installedVersion)\n\(releaseNotes(since: installedVersion))"
+    }
+
+    func adding(changelog: String) -> AvailableRelease {
+        AvailableRelease(
+            tagName: tagName,
+            name: name,
+            body: body,
+            htmlURL: htmlURL,
+            prerelease: prerelease,
+            changelog: changelog,
+            downloadURL: downloadURL
+        )
     }
 }
 
@@ -175,14 +221,19 @@ final class UpdateChecker: ObservableObject {
     private static let allReleasesURL = URL(
         string: "https://api.github.com/repos/pd95/MarkLens/releases?per_page=20"
     )!
+    private static let changelogContentsURL = URL(
+        string: "https://api.github.com/repos/pd95/MarkLens/contents/CHANGELOG.md"
+    )!
     private static let checkInterval: TimeInterval = 7 * 24 * 60 * 60
     private static let lastAttemptKey = "updateChecker.lastAttempt"
     private static let lastSuccessfulCheckKey = "updateChecker.lastSuccessfulCheck"
     private static let lastSuccessfulChannelKey = "updateChecker.lastSuccessfulChannel"
     private static let cachedReleaseKey = "updateChecker.cachedRelease"
     private static let etagKey = "updateChecker.etag"
+    private static let cacheSchemaKey = "updateChecker.cacheSchema"
+    private static let cacheSchemaVersion = 2
 
-    private let currentVersion: String
+    let currentVersion: String
     private let automaticChecksAvailable: Bool
     private let manualChecksEnabled: Bool
     private let defaults: UserDefaults
@@ -210,6 +261,10 @@ final class UpdateChecker: ObservableObject {
         self.defaults = defaults
         self.now = now
         self.request = request
+        if defaults.integer(forKey: Self.cacheSchemaKey) < Self.cacheSchemaVersion {
+            defaults.removeObject(forKey: Self.etagKey)
+            defaults.set(Self.cacheSchemaVersion, forKey: Self.cacheSchemaKey)
+        }
         let currentChannel = Self.releaseChannelIdentifier(in: defaults)
         if defaults.string(forKey: Self.lastSuccessfulChannelKey) == currentChannel {
             self.lastSuccessfulCheck = defaults.object(
@@ -227,7 +282,10 @@ final class UpdateChecker: ObservableObject {
                 includesPrereleases: Self.includesPrereleases(in: defaults)
             )
         {
-            availableRelease = Self.isNewer(release.tagName, than: self.currentVersion) ? release : nil
+            let trustedRelease = Self.removingUntrustedDownloadURL(from: release)
+            availableRelease = Self.isNewer(trustedRelease.tagName, than: self.currentVersion)
+                ? trustedRelease
+                : nil
         }
     }
 
@@ -336,11 +394,21 @@ final class UpdateChecker: ObservableObject {
 
         do {
             let response = try await request(urlRequest)
-            guard includesPrereleases == Self.includesPrereleases(in: defaults) else {
+            guard Task.isCancelled == false,
+                  includesPrereleases == Self.includesPrereleases(in: defaults) else {
                 return false
             }
             if response.statusCode == 304 {
-                markCheckSuccessful()
+                let enrichedRelease = await changelogEnrichedCachedRelease()
+                guard Task.isCancelled == false,
+                      includesPrereleases == Self.includesPrereleases(in: defaults) else {
+                    return false
+                }
+                if let enrichedRelease {
+                    availableRelease = enrichedRelease
+                    cache(enrichedRelease)
+                }
+                markCheckSuccessful(includesPrereleases: includesPrereleases)
                 return true
             }
             guard response.statusCode == 200 else {
@@ -359,7 +427,7 @@ final class UpdateChecker: ObservableObject {
                     } else {
                         defaults.removeObject(forKey: Self.etagKey)
                     }
-                    markCheckSuccessful()
+                    markCheckSuccessful(includesPrereleases: includesPrereleases)
                     return true
                 }
                 githubRelease = newestRelease
@@ -375,23 +443,30 @@ final class UpdateChecker: ObservableObject {
                 return false
             }
 
-            let release = AvailableRelease(
+            var release = AvailableRelease(
                 tagName: githubRelease.tagName,
                 name: githubRelease.name,
                 body: githubRelease.body ?? "",
                 htmlURL: githubRelease.htmlURL,
-                prerelease: githubRelease.prerelease
+                prerelease: githubRelease.prerelease,
+                downloadURL: Self.downloadURL(for: githubRelease)
             )
-            if let cachedData = try? JSONEncoder().encode(release) {
-                defaults.set(cachedData, forKey: Self.cachedReleaseKey)
+            if Self.isNewer(release.tagName, than: currentVersion),
+               let changelog = await loadChangelog(for: release.tagName) {
+                release = release.adding(changelog: changelog)
             }
+            guard Task.isCancelled == false,
+                  includesPrereleases == Self.includesPrereleases(in: defaults) else {
+                return false
+            }
+            cache(release)
             if let etag = response.etag {
                 defaults.set(etag, forKey: Self.etagKey)
             } else {
                 defaults.removeObject(forKey: Self.etagKey)
             }
             availableRelease = Self.isNewer(release.tagName, than: currentVersion) ? release : nil
-            markCheckSuccessful()
+            markCheckSuccessful(includesPrereleases: includesPrereleases)
             return true
         } catch {
             // Update checks must never interrupt normal document work.
@@ -400,13 +475,55 @@ final class UpdateChecker: ObservableObject {
         }
     }
 
-    private func markCheckSuccessful() {
+    private func changelogEnrichedCachedRelease() async -> AvailableRelease? {
+        guard let release = availableRelease,
+              release.changelog == nil,
+              let changelog = await loadChangelog(for: release.tagName) else {
+            return nil
+        }
+        return release.adding(changelog: changelog)
+    }
+
+    private func loadChangelog(for tagName: String) async -> String? {
+        guard ReleaseVersion(tagName) != nil,
+              var components = URLComponents(
+                  url: Self.changelogContentsURL,
+                  resolvingAgainstBaseURL: false
+              ) else {
+            return nil
+        }
+        components.queryItems = [URLQueryItem(name: "ref", value: tagName)]
+        guard let url = components.url else {
+            return nil
+        }
+
+        var urlRequest = URLRequest(url: url)
+        urlRequest.setValue("application/vnd.github.raw+json", forHTTPHeaderField: "Accept")
+        urlRequest.setValue("2022-11-28", forHTTPHeaderField: "X-GitHub-Api-Version")
+        do {
+            let response = try await request(urlRequest)
+            guard response.statusCode == 200 else {
+                return nil
+            }
+            return String(data: response.data, encoding: .utf8)
+        } catch {
+            return nil
+        }
+    }
+
+    private func cache(_ release: AvailableRelease) {
+        if let cachedData = try? JSONEncoder().encode(release) {
+            defaults.set(cachedData, forKey: Self.cachedReleaseKey)
+        }
+    }
+
+    private func markCheckSuccessful(includesPrereleases: Bool) {
         let checkDate = now()
         lastCheckFailed = false
         lastSuccessfulCheck = checkDate
         defaults.set(checkDate, forKey: Self.lastSuccessfulCheckKey)
         defaults.set(
-            Self.releaseChannelIdentifier(in: defaults),
+            Self.releaseChannelIdentifier(includesPrereleases: includesPrereleases),
             forKey: Self.lastSuccessfulChannelKey
         )
     }
@@ -439,7 +556,11 @@ final class UpdateChecker: ObservableObject {
     }
 
     private static func releaseChannelIdentifier(in defaults: UserDefaults) -> String {
-        includesPrereleases(in: defaults) ? "preview" : "stable"
+        releaseChannelIdentifier(includesPrereleases: includesPrereleases(in: defaults))
+    }
+
+    private static func releaseChannelIdentifier(includesPrereleases: Bool) -> String {
+        includesPrereleases ? "preview" : "stable"
     }
 
     private static func isEligible(
@@ -469,6 +590,58 @@ final class UpdateChecker: ObservableObject {
         url.scheme?.lowercased() == "https" && url.host?.lowercased() == "github.com"
     }
 
+    private static func downloadURL(for release: GitHubRelease) -> URL? {
+        let expectedName = "MarkLens-\(release.tagName).zip"
+        return release.assets.first { asset in
+            asset.name == expectedName
+                && asset.state == "uploaded"
+                && isTrustedDownloadURL(
+                    asset.browserDownloadURL,
+                    tagName: release.tagName,
+                    assetName: expectedName
+                )
+        }?.browserDownloadURL
+    }
+
+    private static func removingUntrustedDownloadURL(
+        from release: AvailableRelease
+    ) -> AvailableRelease {
+        guard let downloadURL = release.downloadURL else {
+            return release
+        }
+        let expectedName = "MarkLens-\(release.tagName).zip"
+        guard isTrustedDownloadURL(
+            downloadURL,
+            tagName: release.tagName,
+            assetName: expectedName
+        ) else {
+            return AvailableRelease(
+                tagName: release.tagName,
+                name: release.name,
+                body: release.body,
+                htmlURL: release.htmlURL,
+                prerelease: release.prerelease,
+                changelog: release.changelog
+            )
+        }
+        return release
+    }
+
+    private static func isTrustedDownloadURL(
+        _ url: URL,
+        tagName: String,
+        assetName: String
+    ) -> Bool {
+        url.scheme?.lowercased() == "https"
+            && url.host?.lowercased() == "github.com"
+            && url.user == nil
+            && url.password == nil
+            && url.port == nil
+            && url.query == nil
+            && url.fragment == nil
+            && url.path == "/pd95/MarkLens/releases/download/\(tagName)/\(assetName)"
+    }
+
     #if DEBUG
     private static func mockRelease(from environment: [String: String]) -> AvailableRelease? {
         guard let configuredVersion = environment["MARKLENS_MOCK_UPDATE_VERSION"],
@@ -484,6 +657,9 @@ final class UpdateChecker: ObservableObject {
         guard
             let releaseURL = URL(
                 string: "https://github.com/pd95/MarkLens/releases/tag/\(tagName)"
+            ),
+            let downloadURL = URL(
+                string: "https://github.com/pd95/MarkLens/releases/download/\(tagName)/MarkLens-\(tagName).zip"
             )
         else {
             return nil
@@ -494,7 +670,19 @@ final class UpdateChecker: ObservableObject {
             name: "MarkLens \(tagName)",
             body: "Debug preview of the MarkLens update notification.",
             htmlURL: releaseURL,
-            prerelease: ReleaseVersion(tagName)?.isPrerelease ?? false
+            prerelease: ReleaseVersion(tagName)?.isPrerelease ?? false,
+            changelog: """
+                # Changelog
+
+                ## \(configuredVersion)
+
+                - Debug preview of the newest MarkLens improvements.
+
+                ## 98.0.0
+
+                - An earlier update that was missed.
+                """,
+            downloadURL: downloadURL
         )
     }
     #endif
@@ -519,6 +707,7 @@ private struct GitHubRelease: Decodable {
     let htmlURL: URL
     let draft: Bool
     let prerelease: Bool
+    let assets: [GitHubReleaseAsset]
 
     private enum CodingKeys: String, CodingKey {
         case tagName = "tag_name"
@@ -527,6 +716,30 @@ private struct GitHubRelease: Decodable {
         case htmlURL = "html_url"
         case draft
         case prerelease
+        case assets
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        tagName = try container.decode(String.self, forKey: .tagName)
+        name = try container.decodeIfPresent(String.self, forKey: .name)
+        body = try container.decodeIfPresent(String.self, forKey: .body)
+        htmlURL = try container.decode(URL.self, forKey: .htmlURL)
+        draft = try container.decode(Bool.self, forKey: .draft)
+        prerelease = try container.decode(Bool.self, forKey: .prerelease)
+        assets = try container.decodeIfPresent([GitHubReleaseAsset].self, forKey: .assets) ?? []
+    }
+}
+
+private struct GitHubReleaseAsset: Decodable {
+    let name: String
+    let browserDownloadURL: URL
+    let state: String
+
+    private enum CodingKeys: String, CodingKey {
+        case name
+        case browserDownloadURL = "browser_download_url"
+        case state
     }
 }
 #endif

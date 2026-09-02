@@ -350,7 +350,10 @@ struct ContentView: View {
                         .accessibilityLabel("Update available: MarkLens \(release.displayVersion)")
                         .accessibilityIdentifier("updateAvailableButton")
                         .popover(isPresented: $isUpdatePopoverPresented, arrowEdge: .top) {
-                            UpdateAvailablePopover(release: release)
+                            UpdateAvailablePopover(
+                                release: release,
+                                installedVersion: updateChecker.currentVersion
+                            )
                         }
                     }
 

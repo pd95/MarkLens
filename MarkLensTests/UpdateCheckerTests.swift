@@ -12,7 +12,10 @@ final class UpdateCheckerTests: XCTestCase {
             currentVersion: "1.0.0",
             releaseTag: "v1.0.0",
             defaults: defaults,
-            request: { _ in
+            request: { request in
+                if Self.isChangelogRequest(request) {
+                    return Self.changelogResponse()
+                }
                 requestCount += 1
                 return UpdateHTTPResponse(
                     data: Self.releaseJSON(tag: "v2.0.0"),
@@ -40,6 +43,65 @@ final class UpdateCheckerTests: XCTestCase {
         XCTAssertNil(ReleaseVersion("1.two.0"))
     }
 
+    func testMissedChangesIncludeOnlyVersionsAfterInstalledThroughTarget() throws {
+        let changelog = """
+            # Changelog
+
+            ## 2.0.0
+
+            - Not part of the detected release.
+
+            ## 1.3.0
+
+            - Newest available change.
+
+            ## 1.2.1
+
+            - Intermediate patch.
+
+            ## 1.2.0
+
+            - Already installed.
+
+            ## Notes
+
+            This unversioned section must not leak into another release.
+            """
+
+        let notes = try XCTUnwrap(ReleaseChangelog.missedChanges(
+            in: changelog,
+            installedVersion: "1.2.0",
+            releaseTag: "v1.3.0"
+        ))
+
+        XCTAssertTrue(notes.contains("## 1.3.0"))
+        XCTAssertTrue(notes.contains("## 1.2.1"))
+        XCTAssertFalse(notes.contains("## 2.0.0"))
+        XCTAssertFalse(notes.contains("## 1.2.0"))
+        XCTAssertFalse(notes.contains("unversioned"))
+    }
+
+    func testMissedChangesUseBaseVersionForPrereleaseAndAcceptBracketedHeadings() throws {
+        let changelog = """
+            ## [1.5.0]
+
+            - Preview changes.
+
+            ## 1.4.0
+
+            - Installed changes.
+            """
+
+        let notes = try XCTUnwrap(ReleaseChangelog.missedChanges(
+            in: changelog,
+            installedVersion: "1.4.0",
+            releaseTag: "v1.5.0-rc1"
+        ))
+
+        XCTAssertTrue(notes.contains("Preview changes"))
+        XCTAssertFalse(notes.contains("Installed changes"))
+    }
+
     func testNewerStableReleaseBecomesAvailableAndIsCached() async throws {
         let defaults = makeDefaults()
         let checker = UpdateChecker(
@@ -47,6 +109,14 @@ final class UpdateCheckerTests: XCTestCase {
             releaseTag: "v1.2.0",
             defaults: defaults,
             request: { request in
+                if Self.isChangelogRequest(request) {
+                    XCTAssertEqual(
+                        request.value(forHTTPHeaderField: "Accept"),
+                        "application/vnd.github.raw+json"
+                    )
+                    XCTAssertEqual(request.url?.query, "ref=v1.3.0")
+                    return Self.changelogResponse()
+                }
                 XCTAssertEqual(request.value(forHTTPHeaderField: "Accept"), "application/vnd.github+json")
                 XCTAssertEqual(request.value(forHTTPHeaderField: "X-GitHub-Api-Version"), "2022-11-28")
                 return UpdateHTTPResponse(
@@ -72,6 +142,179 @@ final class UpdateCheckerTests: XCTestCase {
             }
         )
         XCTAssertEqual(restored.availableRelease, checker.availableRelease)
+    }
+
+    func testUpdateLoadsTaggedChangelogAndTrustedZipAsset() async throws {
+        let expectedDownloadURL =
+            "https://github.com/pd95/MarkLens/releases/download/v1.3.0/MarkLens-v1.3.0.zip"
+        let checker = UpdateChecker(
+            currentVersion: "1.1.0",
+            releaseTag: "v1.1.0",
+            defaults: makeDefaults(),
+            request: { request in
+                if Self.isChangelogRequest(request) {
+                    XCTAssertEqual(request.url?.query, "ref=v1.3.0")
+                    return Self.changelogResponse()
+                }
+                return UpdateHTTPResponse(
+                    data: Self.releaseJSON(
+                        tag: "v1.3.0",
+                        assetName: "MarkLens-v1.3.0.zip",
+                        assetURL: expectedDownloadURL
+                    ),
+                    statusCode: 200,
+                    etag: nil
+                )
+            }
+        )
+
+        await checker.checkIfDue()
+
+        let release = try XCTUnwrap(checker.availableRelease)
+        XCTAssertEqual(release.downloadURL?.absoluteString, expectedDownloadURL)
+        let notes = release.releaseNotes(since: checker.currentVersion)
+        XCTAssertTrue(notes.contains("## 1.3.0"))
+        XCTAssertTrue(notes.contains("## 1.2.0"))
+        XCTAssertFalse(notes.contains("## 1.1.0"))
+    }
+
+    func testSupplementalChangelogFailureFallsBackToReleaseBody() async throws {
+        let checker = UpdateChecker(
+            currentVersion: "1.0.0",
+            releaseTag: "v1.0.0",
+            defaults: makeDefaults(),
+            request: { request in
+                if Self.isChangelogRequest(request) {
+                    return UpdateHTTPResponse(data: Data(), statusCode: 503, etag: nil)
+                }
+                return UpdateHTTPResponse(
+                    data: Self.releaseJSON(tag: "v1.1.0", body: "Latest release only."),
+                    statusCode: 200,
+                    etag: nil
+                )
+            }
+        )
+
+        let succeeded = await checker.checkNow()
+
+        XCTAssertTrue(succeeded)
+        let release = try XCTUnwrap(checker.availableRelease)
+        XCTAssertNil(release.changelog)
+        XCTAssertEqual(release.releaseNotes(since: checker.currentVersion), "Latest release only.")
+    }
+
+    func testReleaseNotesIdentityChangesWhenCachedReleaseIsEnriched() {
+        let bodyOnlyRelease = AvailableRelease(
+            tagName: "v1.1.0",
+            name: "MarkLens 1.1.0",
+            body: "Latest release only.",
+            htmlURL: URL(string: "https://github.com/pd95/MarkLens/releases/tag/v1.1.0")!,
+            prerelease: false
+        )
+        let enrichedRelease = bodyOnlyRelease.adding(changelog: """
+            ## 1.1.0
+
+            - Complete changes.
+            """)
+
+        XCTAssertNotEqual(
+            bodyOnlyRelease.releaseNotesContentIdentity(since: "1.0.0"),
+            enrichedRelease.releaseNotesContentIdentity(since: "1.0.0")
+        )
+    }
+
+    func testUntrustedOrUnexpectedZipAssetsAreIgnored() async {
+        for (name, url) in [
+            (
+                "MarkLens-v1.1.0.zip",
+                "https://example.com/pd95/MarkLens/releases/download/v1.1.0/MarkLens-v1.1.0.zip"
+            ),
+            (
+                "another-file.zip",
+                "https://github.com/pd95/MarkLens/releases/download/v1.1.0/another-file.zip"
+            ),
+            (
+                "MarkLens-v1.1.0.zip",
+                "http://github.com/pd95/MarkLens/releases/download/v1.1.0/MarkLens-v1.1.0.zip"
+            ),
+            (
+                "MarkLens-v1.1.0.zip",
+                "https://user@github.com/pd95/MarkLens/releases/download/v1.1.0/MarkLens-v1.1.0.zip"
+            ),
+            (
+                "MarkLens-v1.1.0.zip",
+                "https://github.com:443/pd95/MarkLens/releases/download/v1.1.0/MarkLens-v1.1.0.zip"
+            ),
+            (
+                "MarkLens-v1.1.0.zip",
+                "https://github.com/pd95/MarkLens/releases/download/v1.1.0/MarkLens-v1.1.0.zip?download=1"
+            ),
+            (
+                "MarkLens-v1.1.0.zip",
+                "https://github.com/pd95/MarkLens/releases/download/v1.1.0/MarkLens-v1.1.0.zip#fragment"
+            ),
+            (
+                "MarkLens-v1.1.0.zip",
+                "https://github.com/pd95/MarkLens/releases/download/v2.0.0/MarkLens-v1.1.0.zip"
+            ),
+        ] {
+            let checker = UpdateChecker(
+                currentVersion: "1.0.0",
+                releaseTag: "v1.0.0",
+                defaults: makeDefaults(),
+                request: { request in
+                    if Self.isChangelogRequest(request) {
+                        return Self.changelogResponse()
+                    }
+                    return UpdateHTTPResponse(
+                        data: Self.releaseJSON(tag: "v1.1.0", assetName: name, assetURL: url),
+                        statusCode: 200,
+                        etag: nil
+                    )
+                }
+            )
+
+            await checker.checkIfDue()
+            XCTAssertNil(checker.availableRelease?.downloadURL)
+        }
+    }
+
+    func testDownloadSkipsInvalidAssetsBeforeTrustedUploadedZip() async throws {
+        let expectedURL =
+            "https://github.com/pd95/MarkLens/releases/download/v1.1.0/MarkLens-v1.1.0.zip"
+        var release = Self.releaseObject(tag: "v1.1.0")
+        release["assets"] = [
+            [
+                "name": "MarkLens-v1.1.0.zip",
+                "browser_download_url": expectedURL,
+                "state": "failed",
+            ],
+            [
+                "name": "MarkLens-v1.1.0.zip",
+                "browser_download_url": expectedURL,
+                "state": "uploaded",
+            ],
+        ]
+        let checker = UpdateChecker(
+            currentVersion: "1.0.0",
+            releaseTag: "v1.0.0",
+            defaults: makeDefaults(),
+            request: { request in
+                if Self.isChangelogRequest(request) {
+                    return Self.changelogResponse()
+                }
+                return UpdateHTTPResponse(
+                    data: try! JSONSerialization.data(withJSONObject: release),
+                    statusCode: 200,
+                    etag: nil
+                )
+            }
+        )
+
+        let checkSucceeded = await checker.checkNow()
+
+        XCTAssertTrue(checkSucceeded)
+        XCTAssertEqual(try XCTUnwrap(checker.availableRelease?.downloadURL).absoluteString, expectedURL)
     }
 
     func testCurrentOrOlderReleaseDoesNotBecomeAvailable() async {
@@ -102,6 +345,9 @@ final class UpdateCheckerTests: XCTestCase {
             releaseTag: "v1.4.0",
             defaults: defaults,
             request: { request in
+                if Self.isChangelogRequest(request) {
+                    return Self.changelogResponse()
+                }
                 XCTAssertEqual(request.url?.path, "/repos/pd95/MarkLens/releases")
                 XCTAssertEqual(request.url?.query, "per_page=20")
                 return UpdateHTTPResponse(
@@ -129,6 +375,9 @@ final class UpdateCheckerTests: XCTestCase {
             releaseTag: "v1.4.0",
             defaults: defaults,
             request: { request in
+                if Self.isChangelogRequest(request) {
+                    return Self.changelogResponse()
+                }
                 requestedURLs.append(request.url!)
                 if defaults.bool(forKey: UpdatePreferences.includesPrereleasesKey) {
                     return UpdateHTTPResponse(
@@ -223,6 +472,44 @@ final class UpdateCheckerTests: XCTestCase {
         XCTAssertTrue(release.prerelease)
     }
 
+    func testCacheMigrationInvalidatesTheReleaseETagOnlyOnce() {
+        let defaults = makeDefaults()
+        defaults.set("legacy-etag", forKey: "updateChecker.etag")
+
+        _ = UpdateChecker(
+            currentVersion: "1.0.0",
+            releaseTag: "v1.0.0",
+            defaults: defaults
+        )
+        XCTAssertNil(defaults.string(forKey: "updateChecker.etag"))
+
+        defaults.set("current-etag", forKey: "updateChecker.etag")
+        _ = UpdateChecker(
+            currentVersion: "1.0.0",
+            releaseTag: "v1.0.0",
+            defaults: defaults
+        )
+        XCTAssertEqual(defaults.string(forKey: "updateChecker.etag"), "current-etag")
+    }
+
+    func testCachedChangelogIsRefilteredForTheInstalledVersion() throws {
+        let release = AvailableRelease(
+            tagName: "v1.3.0",
+            name: "MarkLens v1.3.0",
+            body: "Latest release only.",
+            htmlURL: URL(string: "https://github.com/pd95/MarkLens/releases/tag/v1.3.0")!,
+            prerelease: false,
+            changelog: String(data: Self.changelogResponse().data, encoding: .utf8)
+        )
+
+        let notesFromVersionOne = release.releaseNotes(since: "1.1.0")
+        let notesFromVersionTwo = release.releaseNotes(since: "1.2.0")
+
+        XCTAssertTrue(notesFromVersionOne.contains("## 1.2.0"))
+        XCTAssertFalse(notesFromVersionTwo.contains("## 1.2.0"))
+        XCTAssertTrue(notesFromVersionTwo.contains("## 1.3.0"))
+    }
+
     func testChecksAreThrottledForSevenDays() async {
         let defaults = makeDefaults()
         var currentDate = Date(timeIntervalSince1970: 1_000_000)
@@ -232,7 +519,10 @@ final class UpdateCheckerTests: XCTestCase {
             releaseTag: "v1.0.0",
             defaults: defaults,
             now: { currentDate },
-            request: { _ in
+            request: { request in
+                if Self.isChangelogRequest(request) {
+                    return Self.changelogResponse()
+                }
                 requestCount += 1
                 return UpdateHTTPResponse(
                     data: Self.releaseJSON(tag: "v1.1.0"),
@@ -261,7 +551,10 @@ final class UpdateCheckerTests: XCTestCase {
             releaseTag: "v1.0.0",
             defaults: defaults,
             now: { currentDate },
-            request: { _ in
+            request: { request in
+                if Self.isChangelogRequest(request) {
+                    return Self.changelogResponse()
+                }
                 requestCount += 1
                 if requestCount == 2 {
                     throw URLError(.notConnectedToInternet)
@@ -304,6 +597,9 @@ final class UpdateCheckerTests: XCTestCase {
             defaults: defaults,
             now: { currentDate },
             request: { request in
+                if Self.isChangelogRequest(request) {
+                    return Self.changelogResponse()
+                }
                 requestCount += 1
                 if requestCount == 1 {
                     return UpdateHTTPResponse(
@@ -332,13 +628,105 @@ final class UpdateCheckerTests: XCTestCase {
         XCTAssertEqual(checker.availableRelease?.tagName, "v1.1.0")
     }
 
+    func testNotModifiedResponseEnrichesLegacyCachedRelease() async throws {
+        let defaults = makeDefaults()
+        defaults.set(2, forKey: "updateChecker.cacheSchema")
+        defaults.set("cached-etag", forKey: "updateChecker.etag")
+        let cachedRelease = AvailableRelease(
+            tagName: "v1.1.0",
+            name: "MarkLens 1.1.0",
+            body: "Latest release only.",
+            htmlURL: URL(string: "https://github.com/pd95/MarkLens/releases/tag/v1.1.0")!,
+            prerelease: false
+        )
+        defaults.set(
+            try JSONEncoder().encode(cachedRelease),
+            forKey: "updateChecker.cachedRelease"
+        )
+        let checker = UpdateChecker(
+            currentVersion: "1.0.0",
+            releaseTag: "v1.0.0",
+            defaults: defaults,
+            request: { request in
+                if Self.isChangelogRequest(request) {
+                    return Self.changelogResponse()
+                }
+                XCTAssertEqual(request.value(forHTTPHeaderField: "If-None-Match"), "cached-etag")
+                return UpdateHTTPResponse(data: Data(), statusCode: 304, etag: nil)
+            }
+        )
+
+        let checkSucceeded = await checker.checkNow()
+
+        XCTAssertTrue(checkSucceeded)
+        XCTAssertNotNil(checker.availableRelease?.changelog)
+        let cachedData = try XCTUnwrap(defaults.data(forKey: "updateChecker.cachedRelease"))
+        XCTAssertNotNil(try JSONDecoder().decode(AvailableRelease.self, from: cachedData).changelog)
+    }
+
+    func testChannelChangeDuringNotModifiedEnrichmentCannotPublishStaleRelease() async throws {
+        let defaults = makeDefaults()
+        defaults.set(true, forKey: UpdatePreferences.includesPrereleasesKey)
+        defaults.set(2, forKey: "updateChecker.cacheSchema")
+        defaults.set("cached-etag", forKey: "updateChecker.etag")
+        let cachedRelease = AvailableRelease(
+            tagName: "v1.1.0-rc1",
+            name: "MarkLens 1.1.0 RC 1",
+            body: "Preview release.",
+            htmlURL: URL(string: "https://github.com/pd95/MarkLens/releases/tag/v1.1.0-rc1")!,
+            prerelease: true
+        )
+        defaults.set(
+            try JSONEncoder().encode(cachedRelease),
+            forKey: "updateChecker.cachedRelease"
+        )
+        let changelogStarted = TestGate()
+        let allowChangelogResponse = TestGate()
+        var releaseRequestCount = 0
+        let checker = UpdateChecker(
+            currentVersion: "1.0.0",
+            releaseTag: "v1.0.0",
+            defaults: defaults,
+            request: { request in
+                if Self.isChangelogRequest(request) {
+                    await changelogStarted.open()
+                    await allowChangelogResponse.wait()
+                    return Self.changelogResponse()
+                }
+                releaseRequestCount += 1
+                if releaseRequestCount == 1 {
+                    return UpdateHTTPResponse(data: Data(), statusCode: 304, etag: nil)
+                }
+                throw URLError(.notConnectedToInternet)
+            }
+        )
+
+        let initialCheck = Task { await checker.checkNow() }
+        await changelogStarted.wait()
+        defaults.set(false, forKey: UpdatePreferences.includesPrereleasesKey)
+        let channelRefresh = Task { await checker.releaseChannelDidChange() }
+        await allowChangelogResponse.open()
+
+        let initialCheckSucceeded = await initialCheck.value
+        let channelRefreshSucceeded = await channelRefresh.value
+
+        XCTAssertFalse(initialCheckSucceeded)
+        XCTAssertFalse(channelRefreshSucceeded)
+        XCTAssertNil(checker.availableRelease)
+        XCTAssertNil(checker.lastSuccessfulCheck)
+        XCTAssertNil(defaults.string(forKey: "updateChecker.lastSuccessfulChannel"))
+    }
+
     func testConcurrentChecksShareOneRequest() async {
         var requestCount = 0
         let checker = UpdateChecker(
             currentVersion: "1.0.0",
             releaseTag: "v1.0.0",
             defaults: makeDefaults(),
-            request: { _ in
+            request: { request in
+                if Self.isChangelogRequest(request) {
+                    return Self.changelogResponse()
+                }
                 requestCount += 1
                 try? await Task.sleep(for: .milliseconds(25))
                 return UpdateHTTPResponse(
@@ -493,14 +881,20 @@ final class UpdateCheckerTests: XCTestCase {
         body: String = "Release notes",
         url: String = "https://github.com/pd95/MarkLens/releases/tag/v1.1.0",
         draft: Bool = false,
-        prerelease: Bool = false
+        prerelease: Bool = false,
+        assetName: String? = nil,
+        assetURL: String? = nil,
+        assetState: String = "uploaded"
     ) -> Data {
         try! JSONSerialization.data(withJSONObject: releaseObject(
             tag: tag,
             body: body,
             url: url,
             draft: draft,
-            prerelease: prerelease
+            prerelease: prerelease,
+            assetName: assetName,
+            assetURL: assetURL,
+            assetState: assetState
         ))
     }
 
@@ -513,9 +907,12 @@ final class UpdateCheckerTests: XCTestCase {
         body: String = "Release notes",
         url: String = "https://github.com/pd95/MarkLens/releases/tag/v1.1.0",
         draft: Bool = false,
-        prerelease: Bool = false
+        prerelease: Bool = false,
+        assetName: String? = nil,
+        assetURL: String? = nil,
+        assetState: String = "uploaded"
     ) -> [String: Any] {
-        [
+        var release: [String: Any] = [
             "tag_name": tag,
             "name": "MarkLens \(tag)",
             "body": body,
@@ -523,6 +920,64 @@ final class UpdateCheckerTests: XCTestCase {
             "draft": draft,
             "prerelease": prerelease,
         ]
+        if let assetName, let assetURL {
+            release["assets"] = [[
+                "name": assetName,
+                "browser_download_url": assetURL,
+                "state": assetState,
+            ]]
+        }
+        return release
+    }
+
+    nonisolated private static func isChangelogRequest(_ request: URLRequest) -> Bool {
+        request.url?.path == "/repos/pd95/MarkLens/contents/CHANGELOG.md"
+    }
+
+    nonisolated private static func changelogResponse() -> UpdateHTTPResponse {
+        let changelog = """
+            # Changelog
+
+            ## 1.3.0
+
+            - Latest changes.
+
+            ## 1.2.0
+
+            - Earlier missed changes.
+
+            ## 1.1.0
+
+            - Old changes.
+
+            ## 99.0.0
+
+            - Debug changes.
+            """
+        return UpdateHTTPResponse(data: Data(changelog.utf8), statusCode: 200, etag: nil)
+    }
+}
+
+private actor TestGate {
+    private var isOpen = false
+    private var continuations: [CheckedContinuation<Void, Never>] = []
+
+    func wait() async {
+        guard isOpen == false else {
+            return
+        }
+        await withCheckedContinuation { continuation in
+            continuations.append(continuation)
+        }
+    }
+
+    func open() {
+        isOpen = true
+        let pendingContinuations = continuations
+        continuations.removeAll()
+        for continuation in pendingContinuations {
+            continuation.resume()
+        }
     }
 }
 #endif

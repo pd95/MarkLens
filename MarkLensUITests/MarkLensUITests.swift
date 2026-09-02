@@ -38,6 +38,17 @@ final class MarkLensUITests: XCTestCase {
     }
 
     @MainActor
+    func testUpdatePopoverShowsMissedChangesAndDirectDownload() throws {
+        let app = XCUIApplication()
+        app.launchEnvironment["MARKLENS_MOCK_UPDATE_VERSION"] = "99.0.0"
+        let preview = app.openDocument(named: "sample", fileExtension: "md")
+        defer { preview.terminate() }
+
+        preview.verifyUpdatePopover()
+        capture(app, name: "update-release-notes-popover")
+    }
+
+    @MainActor
     func testOpenFileRecorded() throws {
         let preview = XCUIApplication().openDocument(named: "search-sample", fileExtension: "md")
         defer { preview.terminate() }
@@ -217,6 +228,34 @@ private struct MarkLensAppHandle {
 
     var previewText: XCUIElement {
         app.staticTexts["Search Fixture"].firstMatch
+    }
+
+    func verifyUpdatePopover() {
+        let updateButton = app.buttons["updateAvailableButton"].firstMatch
+        XCTAssertTrue(
+            updateButton.waitForExistence(timeout: 5),
+            "Expected the mocked update indicator to appear."
+        )
+        updateButton.click()
+
+        XCTAssertTrue(
+            app.staticTexts["What’s New"].firstMatch.waitForExistence(timeout: 5),
+            "Expected the expanded release-notes popover."
+        )
+        let downloadButton = app.buttons["Download Update"].firstMatch
+        XCTAssertTrue(
+            downloadButton.waitForExistence(timeout: 5),
+            "Expected a direct download action for the release ZIP."
+        )
+        XCTAssertTrue(downloadButton.isHittable, "Expected the download action to remain on-screen.")
+        XCTAssertTrue(
+            app.staticTexts["99.0.0"].firstMatch.waitForExistence(timeout: 5),
+            "Expected the newest changelog section."
+        )
+        XCTAssertTrue(
+            app.staticTexts["98.0.0"].firstMatch.waitForExistence(timeout: 5),
+            "Expected an earlier missed changelog section."
+        )
     }
 
     func openFind() {

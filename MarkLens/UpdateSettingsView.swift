@@ -79,8 +79,8 @@ struct UpdateSettingsView: View {
                         Spacer()
 
                         if let release = checkResult.release {
-                            Button("View Release") {
-                                openURL(release.htmlURL)
+                            Button(release.downloadURL == nil ? "View on GitHub" : "Download Update") {
+                                openURL(release.downloadURL ?? release.htmlURL)
                             }
                         }
                     }

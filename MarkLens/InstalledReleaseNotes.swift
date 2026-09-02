@@ -52,7 +52,10 @@ final class ReleaseNotesCoordinator: ObservableObject {
 
     private let currentReleaseTag: String?
     private let defaults: UserDefaults
+    private let automaticNotes: InstalledReleaseNotes?
+    private let fullChangelogNotes: InstalledReleaseNotes
     private var automaticPresentationClaimed = false
+    private var presentedNotesAcknowledgeCurrentRelease = false
 
     init(
         currentReleaseTag: String = BuildInfo.tagVersion,
@@ -71,27 +74,32 @@ final class ReleaseNotesCoordinator: ObservableObject {
         let forcesAutomaticPresentation = false
         #endif
 
+        let changelog = changelogLoader()
+        let fullChangelogNotes = InstalledReleaseNotes(
+            releaseTag: requestedReleaseTag,
+            previousReleaseTag: nil,
+            markdown: changelog ?? "Release notes are unavailable.",
+            showsFullChangelog: true
+        )
+
         self.defaults = defaults
+        self.fullChangelogNotes = fullChangelogNotes
         #if DEBUG
         if requestedReleaseTag == "local" {
             self.currentReleaseTag = nil
-            notes = InstalledReleaseNotes(
-                releaseTag: requestedReleaseTag,
-                previousReleaseTag: nil,
-                markdown: changelogLoader() ?? "Release notes are unavailable.",
-                showsFullChangelog: true
-            )
+            automaticNotes = nil
+            notes = fullChangelogNotes
             return
         }
         #endif
         guard ReleaseVersion(requestedReleaseTag) != nil else {
             self.currentReleaseTag = nil
-            notes = nil
+            automaticNotes = nil
+            notes = fullChangelogNotes
             return
         }
         self.currentReleaseTag = requestedReleaseTag
 
-        let changelog = changelogLoader()
         let acknowledgedTag = mockedPreviousReleaseTag
             ?? (forcesAutomaticPresentation
                 ? nil
@@ -105,11 +113,13 @@ final class ReleaseNotesCoordinator: ObservableObject {
             defaults.set(requestedReleaseTag, forKey: Self.lastAcknowledgedReleaseKey)
             defaults.set(requestedReleaseTag, forKey: Self.notesReleaseKey)
             defaults.removeObject(forKey: Self.notesBaselineKey)
-            notes = Self.makeNotes(
+            let installedNotes = Self.makeNotes(
                 changelog: changelog,
                 releaseTag: requestedReleaseTag,
                 previousReleaseTag: nil
             )
+            automaticNotes = installedNotes
+            notes = installedNotes
             return
         }
 
@@ -119,11 +129,13 @@ final class ReleaseNotesCoordinator: ObservableObject {
             let storedNotesRelease = defaults.string(forKey: Self.notesReleaseKey)
             let storedBaseline = defaults.string(forKey: Self.notesBaselineKey)
             let baseline = storedNotesRelease == requestedReleaseTag ? storedBaseline : nil
-            notes = Self.makeNotes(
+            let installedNotes = Self.makeNotes(
                 changelog: changelog,
                 releaseTag: requestedReleaseTag,
                 previousReleaseTag: baseline
             )
+            automaticNotes = installedNotes
+            notes = installedNotes
             return
         }
 
@@ -139,29 +151,40 @@ final class ReleaseNotesCoordinator: ObservableObject {
         } else {
             defaults.removeObject(forKey: Self.notesBaselineKey)
         }
-        notes = Self.makeNotes(
+        let installedNotes = Self.makeNotes(
             changelog: changelog,
             releaseTag: requestedReleaseTag,
             previousReleaseTag: previousReleaseTag
         )
+        automaticNotes = installedNotes
+        notes = installedNotes
         shouldPresentAutomatically = true
     }
 
     func claimAutomaticPresentation() -> Bool {
         guard shouldPresentAutomatically,
               automaticPresentationClaimed == false,
-              notes != nil else {
+              let automaticNotes else {
             return false
         }
         automaticPresentationClaimed = true
         shouldPresentAutomatically = false
+        notes = automaticNotes
+        presentedNotesAcknowledgeCurrentRelease = true
         return true
     }
 
+    func presentFullChangelog() {
+        notes = fullChangelogNotes
+        presentedNotesAcknowledgeCurrentRelease = false
+    }
+
     func acknowledgeCurrentRelease() {
-        guard let currentReleaseTag else {
+        guard presentedNotesAcknowledgeCurrentRelease,
+              let currentReleaseTag else {
             return
         }
+        presentedNotesAcknowledgeCurrentRelease = false
         defaults.set(currentReleaseTag, forKey: Self.lastAcknowledgedReleaseKey)
         shouldPresentAutomatically = false
     }
@@ -237,7 +260,7 @@ struct InstalledReleaseNotesView: View {
 
     private var releaseNotesContext: String {
         if notes.showsFullChangelog {
-            return "Complete development changelog"
+            return "Complete changelog"
         }
         if let previousVersion = notes.previousDisplayVersion {
             return "Updated from MarkLens \(previousVersion)"

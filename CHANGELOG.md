@@ -2,7 +2,7 @@
 
 ## 1.8.0 (Unreleased)
 
-- Added persistent “Remind Me Later” and “Skip This Version” update choices, plus offline What’s New notes on first launch after installation or upgrade and full bundled changelog access in development builds.
+- Added persistent “Remind Me Later” and “Skip This Version” update choices, plus offline What’s New notes on first launch after installation or upgrade and full bundled changelog access from the Help menu.
 - Expanded update notifications with a scrollable view of every release missed since the installed version and a direct download link for the release ZIP.
 
 ## 1.7.0

@@ -72,7 +72,7 @@ final class MarkLensUITests: XCTestCase {
         preview.verifyInstalledReleaseNotes(includesPreviousRelease: true)
         capture(app, name: "installed-release-notes-window")
         preview.openInstalledReleaseNotesFromHelp()
-        preview.verifyInstalledReleaseNotesCanScrollToLastIncludedChange()
+        preview.verifyCompleteChangelogCanScrollToOldestChange()
     }
 
     @MainActor
@@ -91,7 +91,7 @@ final class MarkLensUITests: XCTestCase {
         defer { preview.terminate() }
 
         preview.openInstalledReleaseNotesFromHelp()
-        preview.verifyInstalledReleaseNotes(includesPreviousRelease: false)
+        preview.verifyCompleteChangelog()
     }
 
     @MainActor
@@ -128,7 +128,7 @@ final class MarkLensUITests: XCTestCase {
             "Expected the development changelog to remain opt-in."
         )
         preview.openInstalledReleaseNotesFromHelp()
-        preview.verifyCompleteDevelopmentChangelog()
+        preview.verifyCompleteChangelog()
         capture(app, name: "debug-complete-changelog-window")
     }
 
@@ -428,20 +428,20 @@ private struct MarkLensAppHandle {
         menuItem.click()
     }
 
-    func verifyCompleteDevelopmentChangelog() {
+    func verifyCompleteChangelog() {
         let notesWindow = installedReleaseNotesWindow
         XCTAssertTrue(
             notesWindow.waitForExistence(timeout: 5),
-            "Expected the complete development changelog window."
+            "Expected the complete changelog window."
         )
         XCTAssertEqual(
             notesWindow.title,
             "What’s New in MarkLens",
-            "Expected the native development changelog window title."
+            "Expected the native changelog window title."
         )
         XCTAssertTrue(
-            notesWindow.staticTexts["Complete development changelog"].firstMatch.exists,
-            "Expected the development-only context."
+            notesWindow.staticTexts["Complete changelog"].firstMatch.exists,
+            "Expected the complete changelog context."
         )
         XCTAssertTrue(
             notesWindow.staticTexts["1.8.0 (Unreleased)"].firstMatch
@@ -465,14 +465,14 @@ private struct MarkLensAppHandle {
         )
     }
 
-    func verifyInstalledReleaseNotesCanScrollToLastIncludedChange() {
+    func verifyCompleteChangelogCanScrollToOldestChange() {
         let notesWindow = installedReleaseNotesWindow
-        let lastIncludedChange = notesWindow.staticTexts[
-            "Updated the bundled Mermaid renderer to 11.17.2 to incorporate upstream security fixes."
+        let oldestChange = notesWindow.staticTexts[
+            "Improved Quick Look preview rendering and shared app/extension resources."
         ].firstMatch
         XCTAssertTrue(
-            lastIncludedChange.waitForExistence(timeout: 5),
-            "Expected the final included changelog entry to be rendered."
+            oldestChange.waitForExistence(timeout: 5),
+            "Expected the oldest bundled changelog entry to be rendered."
         )
 
         let notesWebView = notesWindow.webViews.firstMatch
@@ -485,15 +485,15 @@ private struct MarkLensAppHandle {
             notesScrollView.waitForExistence(timeout: 5),
             "Expected the release-note content to expose a scroll view."
         )
-        let initialChangeFrame = lastIncludedChange.frame
-        for _ in 0..<8 where lastIncludedChange.isHittable == false {
-            notesScrollView.scroll(byDeltaX: 0, deltaY: -240)
-            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+        let initialChangeFrame = oldestChange.frame
+        for _ in 0..<60 where oldestChange.isHittable == false {
+            notesScrollView.scroll(byDeltaX: 0, deltaY: -400)
+            RunLoop.current.run(until: Date().addingTimeInterval(0.05))
         }
         XCTAssertTrue(
-            lastIncludedChange.isHittable,
-            "Expected scrolling to reveal the last change included in the upgrade range. "
-                + "Initial frame: \(initialChangeFrame); final frame: \(lastIncludedChange.frame); "
+            oldestChange.isHittable,
+            "Expected scrolling to reveal the oldest bundled changelog entry. "
+                + "Initial frame: \(initialChangeFrame); final frame: \(oldestChange.frame); "
                 + "window: \(notesWindow.frame)."
         )
     }

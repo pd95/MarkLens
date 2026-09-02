@@ -97,6 +97,9 @@ struct MarkLensApp: App {
                     .onAppear {
                         releaseNotesCoordinator.acknowledgeCurrentRelease()
                     }
+                    .onChange(of: notes.contentIdentity) {
+                        releaseNotesCoordinator.acknowledgeCurrentRelease()
+                    }
             } else {
                 ContentUnavailableView(
                     "Release Notes Unavailable",
@@ -144,11 +147,11 @@ private struct ReleaseNotesCommands: Commands {
     var body: some Commands {
         CommandGroup(after: .help) {
             Button {
+                coordinator.presentFullChangelog()
                 openWindow(id: ReleaseNotesCoordinator.windowID)
             } label: {
                 Label("What’s New in MarkLens", systemImage: "sparkles")
             }
-            .disabled(coordinator.notes == nil)
         }
     }
 }

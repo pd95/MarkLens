@@ -49,20 +49,33 @@ final class ReleaseNotesCoordinatorTests: XCTestCase {
         XCTAssertFalse(markdown.contains("Old changes"))
     }
 
-    func testHelpReopenRetainsTheOriginalUpgradeRange() throws {
+    func testHelpPresentationUsesFullChangelogWithoutAcknowledgingUpgrade() throws {
         let defaults = makeDefaults()
         defaults.set("v1.1.0", forKey: ReleaseNotesCoordinator.lastAcknowledgedReleaseKey)
-        let first = makeCoordinator(current: "v1.3.0", defaults: defaults)
-        XCTAssertTrue(first.claimAutomaticPresentation())
-        first.acknowledgeCurrentRelease()
+        let coordinator = makeCoordinator(current: "v1.3.0", defaults: defaults)
 
-        let restored = makeCoordinator(current: "v1.3.0", defaults: defaults)
+        coordinator.presentFullChangelog()
 
-        XCTAssertFalse(restored.shouldPresentAutomatically)
-        XCTAssertEqual(restored.notes?.previousReleaseTag, "v1.1.0")
-        let markdown = try XCTUnwrap(restored.notes?.markdown)
+        XCTAssertTrue(coordinator.notes?.showsFullChangelog == true)
+        XCTAssertNil(coordinator.notes?.previousReleaseTag)
+        let fullChangelog = try XCTUnwrap(coordinator.notes?.markdown)
+        XCTAssertTrue(fullChangelog.contains("Current changes"))
+        XCTAssertTrue(fullChangelog.contains("Intermediate changes"))
+        XCTAssertTrue(fullChangelog.contains("Old changes"))
+        coordinator.acknowledgeCurrentRelease()
+        XCTAssertEqual(
+            defaults.string(forKey: ReleaseNotesCoordinator.lastAcknowledgedReleaseKey),
+            "v1.1.0",
+            "Opening the full changelog must not acknowledge pending upgrade notes."
+        )
+
+        XCTAssertTrue(coordinator.claimAutomaticPresentation())
+        XCTAssertFalse(coordinator.notes?.showsFullChangelog == true)
+        XCTAssertEqual(coordinator.notes?.previousReleaseTag, "v1.1.0")
+        let markdown = try XCTUnwrap(coordinator.notes?.markdown)
         XCTAssertTrue(markdown.contains("Current changes"))
         XCTAssertTrue(markdown.contains("Intermediate changes"))
+        XCTAssertFalse(markdown.contains("Old changes"))
     }
 
     func testPrereleaseTagChangeCountsAsUpgradeButBuildNumberDoesNot() {

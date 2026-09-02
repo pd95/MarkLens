@@ -143,8 +143,10 @@ private struct ReleaseNotesCommands: Commands {
 
     var body: some Commands {
         CommandGroup(after: .help) {
-            Button("What’s New in MarkLens") {
+            Button {
                 openWindow(id: ReleaseNotesCoordinator.windowID)
+            } label: {
+                Label("What’s New in MarkLens", systemImage: "sparkles")
             }
             .disabled(coordinator.notes == nil)
         }

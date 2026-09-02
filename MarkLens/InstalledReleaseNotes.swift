@@ -7,6 +7,19 @@ struct InstalledReleaseNotes: Equatable {
     let releaseTag: String
     let previousReleaseTag: String?
     let markdown: String
+    let showsFullChangelog: Bool
+
+    init(
+        releaseTag: String,
+        previousReleaseTag: String?,
+        markdown: String,
+        showsFullChangelog: Bool = false
+    ) {
+        self.releaseTag = releaseTag
+        self.previousReleaseTag = previousReleaseTag
+        self.markdown = markdown
+        self.showsFullChangelog = showsFullChangelog
+    }
 
     var displayVersion: String {
         Self.displayVersion(for: releaseTag)
@@ -17,7 +30,7 @@ struct InstalledReleaseNotes: Equatable {
     }
 
     var contentIdentity: String {
-        "\(releaseTag)\n\(previousReleaseTag ?? "")\n\(markdown)"
+        "\(releaseTag)\n\(previousReleaseTag ?? "")\n\(showsFullChangelog)\n\(markdown)"
     }
 
     private static func displayVersion(for tag: String) -> String {
@@ -59,6 +72,18 @@ final class ReleaseNotesCoordinator: ObservableObject {
         #endif
 
         self.defaults = defaults
+        #if DEBUG
+        if requestedReleaseTag == "local" {
+            self.currentReleaseTag = nil
+            notes = InstalledReleaseNotes(
+                releaseTag: requestedReleaseTag,
+                previousReleaseTag: nil,
+                markdown: changelogLoader() ?? "Release notes are unavailable.",
+                showsFullChangelog: true
+            )
+            return
+        }
+        #endif
         guard ReleaseVersion(requestedReleaseTag) != nil else {
             self.currentReleaseTag = nil
             notes = nil
@@ -189,10 +214,14 @@ struct InstalledReleaseNotesView: View {
                     .accessibilityHidden(true)
 
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("What’s New in MarkLens \(notes.displayVersion)")
+                    Text(releaseNotesTitle)
                         .font(.title2.weight(.semibold))
 
-                    if let previousVersion = notes.previousDisplayVersion {
+                    if notes.showsFullChangelog {
+                        Text("Complete development changelog")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    } else if let previousVersion = notes.previousDisplayVersion {
                         Text("Updated from MarkLens \(previousVersion)")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
@@ -224,7 +253,16 @@ struct InstalledReleaseNotesView: View {
         .frame(minWidth: 520, minHeight: 520)
     }
 
+    private var releaseNotesTitle: String {
+        notes.showsFullChangelog
+            ? "What’s New in MarkLens"
+            : "What’s New in MarkLens \(notes.displayVersion)"
+    }
+
     private var releaseNotesAccessibilityLabel: String {
+        if notes.showsFullChangelog {
+            return "Complete MarkLens development changelog"
+        }
         if let previousVersion = notes.previousDisplayVersion {
             return "Changes since MarkLens \(previousVersion)"
         }

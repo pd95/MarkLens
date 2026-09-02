@@ -111,6 +111,35 @@ final class MarkLensUITests: XCTestCase {
     }
 
     @MainActor
+    func testDebugHelpShowsCompleteBundledChangelog() throws {
+        let app = XCUIApplication()
+        let preview = app.openDocument(named: "sample", fileExtension: "md")
+        defer { preview.terminate() }
+
+        XCTAssertFalse(
+            preview.installedReleaseNotesWindow.exists,
+            "Expected the development changelog to remain opt-in."
+        )
+        preview.openInstalledReleaseNotesFromHelp()
+        preview.verifyCompleteDevelopmentChangelog()
+        capture(app, name: "debug-complete-changelog-window")
+    }
+
+    @MainActor
+    func testFrontMatterCardSupportsDarkMode() throws {
+        let app = XCUIApplication()
+        let preview = app.openDocument(
+            named: "frontmatter",
+            fileExtension: "md",
+            additionalLaunchArguments: ["-AppleInterfaceStyle", "Dark"]
+        )
+        defer { preview.terminate() }
+
+        preview.verifyFrontMatterCard()
+        capture(preview.window, name: "frontmatter-dark-mode")
+    }
+
+    @MainActor
     func testOpenFileRecorded() throws {
         let preview = XCUIApplication().openDocument(named: "search-sample", fileExtension: "md")
         defer { preview.terminate() }
@@ -171,6 +200,7 @@ private extension XCUIApplication {
     func openDocument(
         named baseName: String,
         fileExtension: String,
+        additionalLaunchArguments: [String] = [],
         file: StaticString = #file,
         line: UInt = #line
     ) -> MarkLensAppHandle {
@@ -211,8 +241,7 @@ private extension XCUIApplication {
             "",
             "-LastRenderedDocumentExportFormat",
             "pdf",
-            temporaryDocumentURL.path
-        ]
+        ] + additionalLaunchArguments + [temporaryDocumentURL.path]
         launch()
 
         return previewHandle(
@@ -385,6 +414,43 @@ private struct MarkLensAppHandle {
         let menuItem = helpMenu.menus.menuItems["What’s New in MarkLens"].firstMatch
         XCTAssertTrue(menuItem.waitForExistence(timeout: 5), "Expected the What’s New Help command.")
         menuItem.click()
+    }
+
+    func verifyCompleteDevelopmentChangelog() {
+        let notesWindow = installedReleaseNotesWindow
+        XCTAssertTrue(
+            notesWindow.waitForExistence(timeout: 5),
+            "Expected the complete development changelog window."
+        )
+        XCTAssertTrue(
+            notesWindow.staticTexts["What’s New in MarkLens"].firstMatch
+                .waitForExistence(timeout: 5),
+            "Expected the development changelog title."
+        )
+        XCTAssertTrue(
+            notesWindow.staticTexts["Complete development changelog"].firstMatch.exists,
+            "Expected the development-only context."
+        )
+        XCTAssertTrue(
+            notesWindow.staticTexts["1.8.0 (Unreleased)"].firstMatch
+                .waitForExistence(timeout: 5),
+            "Expected the unreleased changelog section."
+        )
+        XCTAssertTrue(
+            notesWindow.staticTexts["1.0.4"].firstMatch.waitForExistence(timeout: 5),
+            "Expected the entire bundled changelog, including its oldest section."
+        )
+    }
+
+    func verifyFrontMatterCard() {
+        XCTAssertTrue(
+            app.staticTexts["Document details"].firstMatch.waitForExistence(timeout: 5),
+            "Expected the front-matter card summary."
+        )
+        XCTAssertTrue(
+            app.staticTexts["Dark Mode Compatibility"].firstMatch.waitForExistence(timeout: 5),
+            "Expected the front-matter title."
+        )
     }
 
     func verifyInstalledReleaseNotesCanScrollToLastIncludedChange() {

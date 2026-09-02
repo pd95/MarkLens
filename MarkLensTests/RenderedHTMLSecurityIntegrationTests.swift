@@ -1,3 +1,4 @@
+import AppKit
 import MarkdownPipeline
 import WebKit
 import XCTest
@@ -87,6 +88,45 @@ final class RenderedHTMLSecurityIntegrationTests: XCTestCase {
 
         await fulfillment(of: [requested], timeout: 0.5)
         XCTAssertNotEqual(webView.url?.scheme, "blocked-navigation")
+    }
+
+    func testAutomaticFrontMatterThemeFollowsDarkAppearance() async throws {
+        let document = try MarkdownPipeline.defaultHTML().renderHTML(from: .string("""
+            ---
+            title: Dark mode details
+            tags: [swift, markdown]
+            status: current
+            ---
+            # Body
+            """))
+        let webView = WKWebView(
+            frame: CGRect(x: 0, y: 0, width: 600, height: 600),
+            configuration: MarkdownWebView.makeSecureConfiguration()
+        )
+        webView.appearance = NSAppearance(named: .darkAqua)
+        webView.loadHTMLString(document.html, baseURL: nil)
+        try await waitUntilReady(webView)
+
+        let result = try await webView.evaluateJavaScript("""
+            (() => {
+                const card = getComputedStyle(document.querySelector('.frontmatter-card'));
+                const label = getComputedStyle(document.querySelector('.frontmatter-label'));
+                const chip = getComputedStyle(document.querySelector('.frontmatter-chips > li'));
+                return {
+                    dark: matchMedia('(prefers-color-scheme: dark)').matches,
+                    cardBackground: card.backgroundColor,
+                    cardBorder: card.borderTopColor,
+                    label: label.color,
+                    chip: chip.backgroundColor
+                };
+            })()
+            """) as? [String: Any]
+
+        XCTAssertEqual(result?["dark"] as? Bool, true, "\(String(describing: result))")
+        XCTAssertEqual(result?["cardBackground"] as? String, "rgb(37, 39, 43)")
+        XCTAssertEqual(result?["cardBorder"] as? String, "rgb(127, 136, 146)")
+        XCTAssertEqual(result?["label"] as? String, "rgb(185, 185, 185)")
+        XCTAssertEqual(result?["chip"] as? String, "rgb(48, 61, 80)")
     }
 
     private func waitUntilReady(_ webView: WKWebView) async throws {

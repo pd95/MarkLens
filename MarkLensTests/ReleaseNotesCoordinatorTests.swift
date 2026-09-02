@@ -131,7 +131,7 @@ final class ReleaseNotesCoordinatorTests: XCTestCase {
         XCTAssertTrue(changelog.contains("## 1.8.0"))
     }
 
-    func testLocalDevelopmentBuildDoesNotPresentAutomatically() {
+    func testLocalDevelopmentBuildExposesFullChangelogWithoutPresentingAutomatically() {
         let coordinator = ReleaseNotesCoordinator(
             currentReleaseTag: "local",
             defaults: makeDefaults(),
@@ -139,8 +139,11 @@ final class ReleaseNotesCoordinatorTests: XCTestCase {
             changelogLoader: { Self.changelog }
         )
 
-        XCTAssertNil(coordinator.notes)
+        XCTAssertEqual(coordinator.notes?.markdown, Self.changelog)
+        XCTAssertTrue(coordinator.notes?.showsFullChangelog == true)
+        XCTAssertNil(coordinator.notes?.previousReleaseTag)
         XCTAssertFalse(coordinator.shouldPresentAutomatically)
+        XCTAssertFalse(coordinator.claimAutomaticPresentation())
     }
 
     private func makeCoordinator(

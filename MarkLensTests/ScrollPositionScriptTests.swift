@@ -53,13 +53,138 @@ final class ScrollPositionScriptTests: XCTestCase {
         XCTAssertEqual((resolved["occurrence"] as? NSNumber)?.intValue, 1)
     }
 
+    func testAnchorCrossingViewportTopWinsOverCloserAnchorBelow() throws {
+        let context = try makeContext(anchors: [
+            anchor(tag: "DIV", text: "Frontmatter", line: 1, top: -50, height: 100),
+            anchor(tag: "H1", text: "Body", line: 20, top: 10)
+        ])
+
+        let position = try lastReportedPosition(in: context)
+        XCTAssertEqual((position["line"] as? NSNumber)?.intValue, 1)
+    }
+
+    func testSelectionStartLineUsesNearestSourceAncestor() throws {
+        let context = try makeContext(anchors: [])
+        context.evaluateScript("""
+        var selectedSource = {
+            nodeType: 1,
+            dataset: { marklensSourceLine: '7' },
+            parentElement: null
+        };
+        var selectedText = { nodeType: 3, parentElement: selectedSource };
+        window.getSelection = () => ({
+            rangeCount: 1,
+            isCollapsed: false,
+            getRangeAt() { return { startContainer: selectedText }; }
+        });
+        """)
+
+        let value = context.evaluateScript("window.MarkLensScroll.selectionStartLine();")
+        XCTAssertNil(context.exception)
+        XCTAssertEqual(value?.toInt32(), 7)
+    }
+
+    func testSelectionStartLineReturnsNullWithoutSelection() throws {
+        let context = try makeContext(anchors: [])
+        context.evaluateScript("window.getSelection = () => ({ rangeCount: 0, isCollapsed: true });")
+        let value = context.evaluateScript("window.MarkLensScroll.selectionStartLine();")
+        XCTAssertNil(context.exception)
+        XCTAssertTrue(value?.isNull == true)
+    }
+
+    func testSelectionStartLineCountsNewlinesWithinMappedElement() throws {
+        let context = try makeContext(anchors: [])
+        context.evaluateScript("""
+        var selectedSource = {
+            nodeType: 1,
+            dataset: { marklensSourceLine: '7', marklensSourceEndLine: '10' },
+            parentElement: null
+        };
+        var selectedText = { nodeType: 3, parentElement: selectedSource };
+        document.createRange = () => ({
+            setStart() {},
+            setEnd() {},
+            toString() { return 'first\\nsecond\\n'; }
+        });
+        window.getSelection = () => ({
+            rangeCount: 1,
+            isCollapsed: false,
+            getRangeAt() { return { startContainer: selectedText, startOffset: 4 }; }
+        });
+        """)
+
+        let value = context.evaluateScript("window.MarkLensScroll.selectionStartLine();")
+        XCTAssertNil(context.exception)
+        XCTAssertEqual(value?.toInt32(), 9)
+    }
+
+    func testSelectionStartLineUsesSeparateTextStartForFencedCode() throws {
+        let context = try makeContext(anchors: [])
+        context.evaluateScript("""
+        var selectedSource = {
+            nodeType: 1,
+            dataset: {
+                marklensSourceLine: '20',
+                marklensSelectionLine: '21',
+                marklensSourceEndLine: '24'
+            },
+            parentElement: null
+        };
+        var selectedText = { nodeType: 3, parentElement: selectedSource };
+        document.createRange = () => ({
+            setStart() {},
+            setEnd() {},
+            toString() { return 'first line\\n'; }
+        });
+        window.getSelection = () => ({
+            rangeCount: 1,
+            isCollapsed: false,
+            getRangeAt() { return { startContainer: selectedText, startOffset: 3 }; }
+        });
+        """)
+
+        let value = context.evaluateScript("window.MarkLensScroll.selectionStartLine();")
+        XCTAssertNil(context.exception)
+        XCTAssertEqual(value?.toInt32(), 22)
+    }
+
+    func testSelectionStartLineCountsRenderedHardBreaks() throws {
+        let context = try makeContext(anchors: [])
+        context.evaluateScript("""
+        var selectedSource = {
+            nodeType: 1,
+            dataset: { marklensSourceLine: '30', marklensSourceEndLine: '31' },
+            parentElement: null
+        };
+        var selectedText = { nodeType: 3, parentElement: selectedSource };
+        document.createRange = () => ({
+            setStart() {},
+            setEnd() {},
+            toString() { return 'before break'; },
+            cloneContents() {
+                return { querySelectorAll(selector) { return selector === 'br' ? [1] : []; } };
+            }
+        });
+        window.getSelection = () => ({
+            rangeCount: 1,
+            isCollapsed: false,
+            getRangeAt() { return { startContainer: selectedText, startOffset: 2 }; }
+        });
+        """)
+
+        let value = context.evaluateScript("window.MarkLensScroll.selectionStartLine();")
+        XCTAssertNil(context.exception)
+        XCTAssertEqual(value?.toInt32(), 31)
+    }
+
     private func anchor(
         tag: String,
         text: String,
         line: Int,
-        top: Int = 1_000
+        top: Int = 1_000,
+        height: Int = 20
     ) -> [String: Any] {
-        ["tag": tag, "text": text, "line": line, "top": top]
+        ["tag": tag, "text": text, "line": line, "top": top, "height": height]
     }
 
     private func makeContext(anchors: [[String: Any]]) throws -> JSContext {
@@ -76,8 +201,9 @@ final class ScrollPositionScriptTests: XCTestCase {
             textContent: spec.text,
             dataset: { marklensSourceLine: String(spec.line) },
             top: spec.top,
+            parentElement: null,
             getBoundingClientRect() {
-                return { top: this.top, bottom: this.top + 20 };
+                return { top: this.top, bottom: this.top + spec.height };
             }
         }));
         var document = {

@@ -8,6 +8,7 @@ nonisolated struct WikiPage: Equatable, Sendable {
     let html: String
     let resources: [HTMLResource]
     let containsWikiLinks: Bool
+    let containsFrontMatter: Bool
     let filteredHTMLFragmentCount: Int
     let htmlContentAdjustmentReason: HTMLContentAdjustmentReason?
     let displayPath: String
@@ -19,6 +20,7 @@ nonisolated struct WikiPage: Equatable, Sendable {
         html: String,
         resources: [HTMLResource],
         containsWikiLinks: Bool,
+        containsFrontMatter: Bool = false,
         filteredHTMLFragmentCount: Int = 0,
         htmlContentAdjustmentReason: HTMLContentAdjustmentReason? = nil,
         displayPath: String,
@@ -29,6 +31,7 @@ nonisolated struct WikiPage: Equatable, Sendable {
         self.html = html
         self.resources = resources
         self.containsWikiLinks = containsWikiLinks
+        self.containsFrontMatter = containsFrontMatter
         self.filteredHTMLFragmentCount = filteredHTMLFragmentCount
         self.htmlContentAdjustmentReason = htmlContentAdjustmentReason
         self.displayPath = displayPath
@@ -275,6 +278,7 @@ enum WikiPageLoader {
                 html: document.html,
                 resources: document.resources,
                 containsWikiLinks: document.containsWikiLinks,
+                containsFrontMatter: document.containsFrontMatter,
                 filteredHTMLFragmentCount: document.filteredHTMLFragmentCount,
                 htmlContentAdjustmentReason: document.filteredHTMLFragmentCount > 0
                     ? renderingPreferences.htmlContentAdjustmentReason

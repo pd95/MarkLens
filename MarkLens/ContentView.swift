@@ -24,6 +24,11 @@ struct DocumentScrollPosition: Equatable {
     static let top = DocumentScrollPosition(sourceLine: 1, progress: 0)
 }
 
+private enum FrontMatterPageKey: Hashable {
+    case root
+    case wiki(URL)
+}
+
 struct ContentView: View {
     @Environment(\.scenePhase) private var scenePhase
 #if os(macOS)
@@ -83,6 +88,10 @@ struct ContentView: View {
     @State private var sourceScrollTarget = DocumentScrollPosition.top
     @State private var previewScrollRequest = 0
     @State private var sourceScrollRequest = 0
+    @State private var sourceSelectionLine: Int?
+    @State private var expandedFrontMatterPages: Set<FrontMatterPageKey> = []
+    @State private var sourceEditPositionRequest: UUID?
+    @State private var isPreparingRawEditing = false
 
     init(document: MarkdownDocument, fileURL: URL? = nil) {
         self.document = document
@@ -128,6 +137,9 @@ struct ContentView: View {
                 findSelectionAction: { selection in
                     previewFindText = selection
                 },
+                frontMatterExpanded: frontMatterExpandedBinding,
+                sourceEditPositionRequest: sourceEditPositionRequest,
+                sourceEditPositionAction: completeBeginRawEditing,
                 scrollPosition: $previewScrollPosition,
                 scrollTarget: previewScrollTarget,
                 scrollRequest: previewScrollRequest
@@ -141,7 +153,8 @@ struct ContentView: View {
                     showFind: $showFind,
                     scrollPosition: $sourceScrollPosition,
                     scrollTarget: sourceScrollTarget,
-                    scrollRequest: sourceScrollRequest
+                    scrollRequest: sourceScrollRequest,
+                    selectionLine: sourceSelectionLine
                 )
                     .disabled(isResolvingExternalChange)
                     .transition(.move(edge: .trailing))
@@ -409,7 +422,7 @@ struct ContentView: View {
                         Label("Edit Source", systemImage: "square.and.pencil")
                     }
                     .keyboardShortcut("e")
-                    .disabled(wikiNavigation.isBrowsing)
+                    .disabled(wikiNavigation.isBrowsing || isPreparingRawEditing)
                 }
             }
         }
@@ -681,6 +694,7 @@ struct ContentView: View {
         let resources = displayedResources
         let css = customCSS
         let sourceURL = displayedURL
+        let frontMatterExpanded = frontMatterExpandedBinding.wrappedValue
 
         Task {
             let errorDescription = await Task.detached(priority: .userInitiated) {
@@ -690,6 +704,7 @@ struct ContentView: View {
                         resources: resources,
                         customCSS: css,
                         sourceURL: sourceURL,
+                        frontMatterExpanded: frontMatterExpanded,
                         to: destinationURL
                     )
                     return nil as String?
@@ -708,6 +723,15 @@ struct ContentView: View {
 #endif
 
     private func beginRawEditing() {
+        guard isPreparingRawEditing == false else { return }
+        isPreparingRawEditing = true
+        sourceEditPositionRequest = UUID()
+    }
+
+    private func completeBeginRawEditing(request: UUID, selectedSourceLine: Int?) {
+        guard sourceEditPositionRequest == request else { return }
+        sourceEditPositionRequest = nil
+        isPreparingRawEditing = false
         let source = rawString()
         RawEditorPerformanceInstrumentation.event(
             "EditModeRequested",
@@ -716,6 +740,7 @@ struct ContentView: View {
         RawEditorPerformanceInstrumentation.measure("EditModeStatePreparation") {
             rawDraft = source
             sourceScrollTarget = previewScrollPosition
+            sourceSelectionLine = selectedSourceLine ?? previewScrollPosition.sourceLine
             sourceScrollRequest += 1
             isRawEditing = true
         }
@@ -947,6 +972,24 @@ struct ContentView: View {
 
     private var displayedContainsWikiLinks: Bool {
         wikiNavigation.currentPage?.containsWikiLinks ?? document.containsWikiLinks
+    }
+
+    private var displayedFrontMatterPageKey: FrontMatterPageKey {
+        wikiNavigation.currentPage.map { .wiki($0.url.standardizedFileURL) } ?? .root
+    }
+
+    private var frontMatterExpandedBinding: Binding<Bool> {
+        let key = displayedFrontMatterPageKey
+        return Binding(
+            get: { expandedFrontMatterPages.contains(key) },
+            set: { expanded in
+                if expanded {
+                    expandedFrontMatterPages.insert(key)
+                } else {
+                    expandedFrontMatterPages.remove(key)
+                }
+            }
+        )
     }
 
     private var displayedPageIdentity: String {

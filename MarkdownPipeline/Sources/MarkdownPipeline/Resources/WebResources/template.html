@@ -83,6 +83,15 @@
             }
 
             document.addEventListener('DOMContentLoaded', () => {
+                const frontmatter = document.getElementById('marklens-frontmatter');
+                if (frontmatter) {
+                    frontmatter.addEventListener('toggle', () => {
+                        const handler = window.webkit?.messageHandlers?.marklensFrontMatter;
+                        if (handler) {
+                            handler.postMessage({ expanded: frontmatter.open });
+                        }
+                    });
+                }
                 const codeBlocks = Array.from(document.querySelectorAll('pre > code'))
                     .filter(code => !code.closest('[data-mermaid-diagram]'));
                 const canVirtualizeCodeBlocks =

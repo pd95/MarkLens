@@ -20,6 +20,7 @@ struct RawEditorView: View {
     @Binding var scrollPosition: DocumentScrollPosition
     var scrollTarget: DocumentScrollPosition
     var scrollRequest: Int
+    var selectionLine: Int?
 
     @ViewBuilder
     private var standardTextEditor: some View {
@@ -39,7 +40,8 @@ struct RawEditorView: View {
                 showFind: $showFind,
                 scrollPosition: $scrollPosition,
                 scrollTarget: scrollTarget,
-                scrollRequest: scrollRequest
+                scrollRequest: scrollRequest,
+                selectionLine: selectionLine
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .accessibilityLabel("Markdown source editor")
@@ -51,7 +53,8 @@ struct RawEditorView: View {
                     RawEditorScrollBridge(
                         scrollPosition: $scrollPosition,
                         scrollTarget: scrollTarget,
-                        scrollRequest: scrollRequest
+                        scrollRequest: scrollRequest,
+                        selectionLine: selectionLine
                     )
                 )
                 .font(.system(.body, design: .monospaced))
@@ -65,7 +68,8 @@ struct RawEditorView: View {
                     RawEditorScrollBridge(
                         scrollPosition: $scrollPosition,
                         scrollTarget: scrollTarget,
-                        scrollRequest: scrollRequest
+                        scrollRequest: scrollRequest,
+                        selectionLine: selectionLine
                     )
                 )
                 .font(.system(.body, design: .monospaced))
@@ -88,12 +92,38 @@ private enum LargeDocumentEditorPolicy {
 }
 
 #if os(macOS)
+@MainActor
+private func focusEditor(_ textView: NSTextView) {
+    guard textView.window?.firstResponder !== textView else { return }
+    if let window = textView.window {
+        window.makeFirstResponder(textView)
+    } else {
+        DispatchQueue.main.async { [weak textView] in
+            guard let textView else { return }
+            textView.window?.makeFirstResponder(textView)
+        }
+    }
+}
+#else
+@MainActor
+private func focusEditor(_ textView: UITextView) {
+    guard textView.isFirstResponder == false else { return }
+    if textView.becomeFirstResponder() == false {
+        DispatchQueue.main.async { [weak textView] in
+            textView?.becomeFirstResponder()
+        }
+    }
+}
+#endif
+
+#if os(macOS)
 private struct LargeDocumentTextEditor: NSViewRepresentable {
     @Binding var text: String
     @Binding var showFind: Bool
     @Binding var scrollPosition: DocumentScrollPosition
     var scrollTarget: DocumentScrollPosition
     var scrollRequest: Int
+    var selectionLine: Int?
 
     func makeCoordinator() -> Coordinator { Coordinator(parent: self) }
 
@@ -232,10 +262,16 @@ private struct LargeDocumentTextEditor: NSViewRepresentable {
                   let textView,
                   let lineIndex else { return }
             appliedRequest = parent.scrollRequest
+            focusEditor(textView)
             RawEditorPerformanceInstrumentation.measure("LargeRawEditorApplyTarget") {
+                if let line = parent.selectionLine {
+                    let character = lineIndex.characterOffset(forLine: line)
+                    textView.setSelectedRange(NSRange(location: character, length: 0))
+                }
                 if let line = parent.scrollTarget.sourceLine {
                     let character = lineIndex.characterOffset(forLine: line)
-                    textView.scrollRangeToVisible(NSRange(location: character, length: 0))
+                    let range = NSRange(location: character, length: 0)
+                    textView.scrollRangeToVisible(range)
                 } else {
                     let character = lineIndex.characterOffset(
                         forProgress: parent.scrollTarget.progress
@@ -293,6 +329,7 @@ private struct LargeDocumentTextEditor: UIViewRepresentable {
     @Binding var scrollPosition: DocumentScrollPosition
     var scrollTarget: DocumentScrollPosition
     var scrollRequest: Int
+    var selectionLine: Int?
 
     func makeCoordinator() -> Coordinator { Coordinator(parent: self) }
 
@@ -412,13 +449,19 @@ private struct LargeDocumentTextEditor: UIViewRepresentable {
                   let textView,
                   let lineIndex else { return }
             appliedRequest = parent.scrollRequest
+            focusEditor(textView)
+            if let line = parent.selectionLine {
+                let character = lineIndex.characterOffset(forLine: line)
+                textView.selectedRange = NSRange(location: character, length: 0)
+            }
             let character: Int
             if let line = parent.scrollTarget.sourceLine {
                 character = lineIndex.characterOffset(forLine: line)
             } else {
                 character = lineIndex.characterOffset(forProgress: parent.scrollTarget.progress)
             }
-            textView.scrollRangeToVisible(NSRange(location: character, length: 0))
+            let range = NSRange(location: character, length: 0)
+            textView.scrollRangeToVisible(range)
         }
 
         func textViewDidChange(_ textView: UITextView) {
@@ -469,6 +512,7 @@ private struct RawEditorScrollBridge: NSViewRepresentable {
     @Binding var scrollPosition: DocumentScrollPosition
     var scrollTarget: DocumentScrollPosition
     var scrollRequest: Int
+    var selectionLine: Int?
 
     func makeCoordinator() -> Coordinator { Coordinator(parent: self) }
     func makeNSView(context: Context) -> NSView { NSView(frame: .zero) }
@@ -613,14 +657,19 @@ private struct RawEditorScrollBridge: NSViewRepresentable {
                   let textView,
                   let lineIndex else { return }
             appliedRequest = parent.scrollRequest
+            focusEditor(textView)
+            if let line = parent.selectionLine {
+                let character = lineIndex.characterOffset(forLine: line)
+                textView.setSelectedRange(NSRange(location: character, length: 0))
+            }
             if let line = parent.scrollTarget.sourceLine,
                let layoutManager = textView.layoutManager,
                let textContainer = textView.textContainer {
+                let character = lineIndex.characterOffset(forLine: line)
                 let glyphCount = RawEditorPerformanceInstrumentation.measure("RawEditorGlyphCount") {
                     layoutManager.numberOfGlyphs
                 }
                 if glyphCount > 0 {
-                    let character = lineIndex.characterOffset(forLine: line)
                     let glyph = layoutManager.glyphIndexForCharacter(
                         at: min(character, max(0, textView.string.utf16.count - 1))
                     )
@@ -698,6 +747,7 @@ private struct RawEditorScrollBridge: UIViewRepresentable {
     @Binding var scrollPosition: DocumentScrollPosition
     var scrollTarget: DocumentScrollPosition
     var scrollRequest: Int
+    var selectionLine: Int?
 
     func makeCoordinator() -> Coordinator { Coordinator(parent: self) }
     func makeUIView(context: Context) -> UIView { UIView(frame: .zero) }
@@ -820,6 +870,11 @@ private struct RawEditorScrollBridge: UIViewRepresentable {
                   let textView,
                   let lineIndex else { return }
             appliedRequest = parent.scrollRequest
+            focusEditor(textView)
+            if let line = parent.selectionLine {
+                let character = lineIndex.characterOffset(forLine: line)
+                textView.selectedRange = NSRange(location: character, length: 0)
+            }
             if let line = parent.scrollTarget.sourceLine,
                textView.layoutManager.numberOfGlyphs > 0 {
                 let character = lineIndex.characterOffset(forLine: line)

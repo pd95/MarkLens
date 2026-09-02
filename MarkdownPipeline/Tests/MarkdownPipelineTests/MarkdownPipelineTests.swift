@@ -46,6 +46,267 @@ struct FrontMatterTests {
         #expect(result.bodyMarkdown == "# Content")
         #expect(result.bodyLineOffset == 3)
     }
+
+    @Test func parsesNestedSequencesMappingsAndFlowValuesInSourceOrder() throws {
+        let input = """
+        ---
+        title: Example
+        tags: [swift, "front matter"]
+        questions:
+          - First question?
+          - Second question?
+        author:
+          name: Jane
+          active: true
+        contributors:
+          - name: Sam
+            role: Writer
+        ---
+        Body
+        """
+        let result = FrontMatterExtractor().extract(from: input)
+        #expect(result.frontMatter?.parseError == nil)
+        guard case .mapping(let pairs, _)? = result.frontMatter?.root else {
+            Issue.record("Expected a top-level mapping")
+            return
+        }
+        #expect(pairs.map(\.key) == ["title", "tags", "questions", "author", "contributors"])
+        guard case .sequence(let questions, _)? = pairs.first(where: { $0.key == "questions" })?.value else {
+            Issue.record("Expected questions to be a sequence")
+            return
+        }
+        #expect(questions.map(\.line) == [5, 6])
+        guard case .sequence(let contributors, _)? = pairs.first(where: { $0.key == "contributors" })?.value,
+              case .mapping(let contributorPairs, _) = contributors[0] else {
+            Issue.record("Expected a mapping inside the contributors sequence")
+            return
+        }
+        #expect(contributorPairs.map(\.key) == ["name", "role"])
+    }
+
+    @Test func parsesBlockScalarsAndStrictScalarTypes() {
+        let input = """
+        ---
+        summary: >-
+          First line
+          continues
+        literal: |
+          One
+          Two
+        enabled: true
+        count: 12
+        ratio: 1.5
+        date: 2026-09-01
+        conventional: yes
+        empty: null
+        ---
+        Body
+        """
+        let result = FrontMatterExtractor().extract(from: input)
+        guard case .mapping(let pairs, _)? = result.frontMatter?.root else {
+            Issue.record("Expected a top-level mapping")
+            return
+        }
+        #expect(pairs[0].value.stringValue == "First line continues")
+        #expect(pairs[1].value.stringValue == "One\nTwo\n")
+        #expect(pairs[5].value.stringValue == "2026-09-01")
+        #expect(pairs[6].value.stringValue == "yes")
+        #expect(pairs[7].value == .scalar(.null, line: 13))
+    }
+
+    @Test func unsupportedYAMLUsesRawFallbackWithoutLosingBodyOffset() {
+        let input = """
+        ---
+        base: &base
+          value: one
+        ---
+        # Body
+        """
+        let result = FrontMatterExtractor().extract(from: input)
+        #expect(result.frontMatter?.root == nil)
+        #expect(result.frontMatter?.parseError?.contains("not supported") == true)
+        #expect(result.frontMatter?.raw.contains("&base") == true)
+        #expect(result.bodyMarkdown == "# Body")
+        #expect(result.bodyLineOffset == 4)
+    }
+
+    @Test func sequenceURLIsAStringRatherThanAMapping() {
+        let input = """
+        ---
+        links:
+          - https://example.com/path
+        ---
+        Body
+        """
+        let result = FrontMatterExtractor().extract(from: input)
+        guard case .mapping(let pairs, _)? = result.frontMatter?.root,
+              case .sequence(let links, _) = pairs[0].value else {
+            Issue.record("Expected a links sequence")
+            return
+        }
+        #expect(links[0].stringValue == "https://example.com/path")
+    }
+
+    @Test func acceptsTrailingCommasInFlowCollections() {
+        let input = """
+        ---
+        tags: [one, two,]
+        options: {draft: false, count: 2,}
+        ---
+        Body
+        """
+        let result = FrontMatterExtractor().extract(from: input)
+        guard case .mapping(let pairs, _)? = result.frontMatter?.root,
+              case .sequence(let tags, _) = pairs[0].value,
+              case .mapping(let options, _) = pairs[1].value else {
+            Issue.record("Expected flow collections")
+            return
+        }
+        #expect(tags.compactMap(\.stringValue) == ["one", "two"])
+        #expect(options.map(\.key) == ["draft", "count"])
+        #expect(result.frontMatter?.parseError == nil)
+    }
+
+    @Test func preservesTitleAndThemeWhenRichParsingFallsBack() throws {
+        let input = """
+        ---
+        title: Still available # window title
+        theme: dark
+        base: &base
+          value: unsupported
+        ---
+        Body
+        """
+        let result = FrontMatterExtractor().extract(from: input)
+        #expect(result.frontMatter?.root == nil)
+        #expect(result.frontMatter?.parseError != nil)
+        #expect(result.frontMatter?.title == "Still available")
+        #expect(result.frontMatter?.titleLine == 2)
+        #expect(result.frontMatter?.theme == "dark")
+        let document = try MarkdownPipeline.defaultHTML().renderHTML(from: .string(input))
+        #expect(document.title == "Still available")
+        #expect(document.html.contains("data-marklens-theme=\"dark\""))
+    }
+
+    @Test func distinguishesEmptySequenceMappingValueFromItsNextKey() {
+        let input = """
+        ---
+        contributors:
+          - name:
+            role: Writer
+        ---
+        Body
+        """
+        let result = FrontMatterExtractor().extract(from: input)
+        guard case .mapping(let rootPairs, _)? = result.frontMatter?.root,
+              case .sequence(let contributors, _) = rootPairs[0].value,
+              case .mapping(let contributorPairs, _) = contributors[0] else {
+            Issue.record("Expected a mapping inside the contributors sequence")
+            return
+        }
+        #expect(contributorPairs.map(\.key) == ["name", "role"])
+        #expect(contributorPairs[0].value == .scalar(.null, line: 3))
+    }
+
+    @Test func parsesBlockScalarsInSequencesAndSequenceMappings() {
+        let input = """
+        ---
+        notes:
+          - |-
+            First
+            Second
+          - text: >-
+              Folded
+              text
+        ---
+        Body
+        """
+        let result = FrontMatterExtractor().extract(from: input)
+        guard case .mapping(let rootPairs, _)? = result.frontMatter?.root,
+              case .sequence(let notes, _) = rootPairs[0].value,
+              case .mapping(let notePairs, _) = notes[1] else {
+            Issue.record("Expected parsed block scalars")
+            return
+        }
+        #expect(notes[0].stringValue == "First\nSecond")
+        #expect(notePairs[0].value.stringValue == "Folded text")
+    }
+
+    @Test func rendersAccessibleFrontMatterWithSpecializedFieldsAndEscaping() throws {
+        let input = """
+        ---
+        title: Example <script>alert(1)</script>
+        summary: A useful summary
+        questions:
+          - First?
+          - Second?
+        tags: [swift, markdown]
+        status: current
+        reviewed_at: 2026-09-01
+        ---
+        # Body
+        """
+        let document = try MarkdownPipeline.defaultHTML().renderHTML(from: .string(input))
+        #expect(document.containsFrontMatter)
+        #expect(document.html.contains("<details id=\"marklens-frontmatter\" class=\"frontmatter-card\">"))
+        #expect(document.html.contains("Document details"))
+        #expect(document.html.contains("frontmatter-summary-title\" data-marklens-source-line=\"2\""))
+        #expect(document.html.contains("<div class=\"frontmatter-title\"") == false)
+        #expect(document.html.contains("<div class=\"frontmatter-print-title\">"))
+        #expect(document.html.contains("frontmatter-chips"))
+        #expect(document.html.contains("frontmatter-questions"))
+        #expect(document.html.contains(">Reviewed</span>"))
+        #expect(document.html.contains("data-marklens-source-line=\"5\">"))
+        #expect(document.html.contains("&lt;script&gt;alert(1)&lt;/script&gt;"))
+        #expect(document.html.contains("<script>alert(1)</script>") == false)
+        #expect(document.html.contains("data-marklens-source-line=\"11\">Body</h1>"))
+    }
+
+    @Test func blockScalarRenderingIncludesItsSourceLineRange() throws {
+        let input = """
+        ---
+        summary: |-
+          First line
+          Second line
+        ---
+        Body
+        """
+        let document = try MarkdownPipeline.defaultHTML().renderHTML(from: .string(input))
+        #expect(document.html.contains(
+            "class=\"frontmatter-string\" data-marklens-source-line=\"3\" data-marklens-source-end-line=\"4\""
+        ))
+        #expect(document.html.contains(".frontmatter-card[open] .frontmatter-print-title"))
+    }
+
+    @Test func foldedBlockScalarKeepsSelectableSourceLineSegments() throws {
+        let input = """
+        ---
+        summary: >-
+          First line
+          Second line
+        ---
+        Body
+        """
+        let document = try MarkdownPipeline.defaultHTML().renderHTML(from: .string(input))
+        #expect(document.html.contains(
+            "<span data-marklens-source-line=\"3\">First line</span> <span data-marklens-source-line=\"4\">Second line</span>"
+        ))
+    }
+
+    @Test func rendersInvalidFrontMatterAsEscapedRawFallback() throws {
+        let input = """
+        ---
+        tags: [one
+        unsafe: <script>
+        ---
+        Body
+        """
+        let document = try MarkdownPipeline.defaultHTML().renderHTML(from: .string(input))
+        #expect(document.containsFrontMatter)
+        #expect(document.html.contains("frontmatter-invalid"))
+        #expect(document.html.contains("Unable to parse"))
+        #expect(document.html.contains("unsafe: &lt;script&gt;"))
+    }
 }
 
 @Test func sanitizesDisallowedRawHTML() throws {

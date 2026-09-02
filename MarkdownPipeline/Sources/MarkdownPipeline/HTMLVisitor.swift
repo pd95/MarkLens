@@ -204,7 +204,11 @@ struct HTMLVisitor: MarkupVisitor {
 
     mutating func visitCodeBlock(_ codeBlock: CodeBlock) -> String {
         if let rendered = plugins.renderCodeBlock(codeBlock) {
-            return addingSourceLine(to: rendered, for: codeBlock)
+            return addingSourceLine(
+                to: rendered,
+                for: codeBlock,
+                selectionLine: codeContentStartLine(for: codeBlock)
+            )
         }
 
         let declaredLanguage = HLJSHighlighter.normalizedLanguageIdentifier(from: codeBlock.language)
@@ -213,7 +217,11 @@ struct HTMLVisitor: MarkupVisitor {
             source: declaredLanguage == nil ? .fallback : .explicit
         )
         let languageClass = "lang-\(metadata.identifier)".encodedHTMLAttribute()
-        var result = "<pre\(sourceLineAttribute(for: codeBlock))>"
+        let sourceAttribute = sourceLineAttribute(
+            for: codeBlock,
+            selectionLine: codeContentStartLine(for: codeBlock)
+        )
+        var result = "<pre\(sourceAttribute)>"
             + "<code class=\"\(languageClass)\"\(metadata.htmlAttributes)>"
         result += plugins.restoreLiteral(codeBlock.code)
             .trimmingCharacters(in: .newlines)
@@ -362,13 +370,37 @@ struct HTMLVisitor: MarkupVisitor {
         return result
     }
 
-    private func sourceLineAttribute(for markup: any Markup) -> String {
-        guard let line = markup.range?.lowerBound.line else { return "" }
-        return " data-marklens-source-line=\"\(line + sourceLineOffset)\""
+    private func sourceLineAttribute(
+        for markup: any Markup,
+        selectionLine: Int? = nil
+    ) -> String {
+        guard let range = markup.range else { return "" }
+        let line = range.lowerBound.line + sourceLineOffset
+        let endLine = range.upperBound.line + sourceLineOffset
+        var result = " data-marklens-source-line=\"\(line)\""
+        if let selectionLine, selectionLine != line {
+            result += " data-marklens-selection-line=\"\(selectionLine)\""
+        }
+        if endLine > line {
+            result += " data-marklens-source-end-line=\"\(endLine)\""
+        }
+        return result
     }
 
-    private func addingSourceLine(to html: String, for markup: any Markup) -> String {
-        let attribute = sourceLineAttribute(for: markup)
+    private func codeContentStartLine(for codeBlock: CodeBlock) -> Int? {
+        guard let range = codeBlock.range else { return nil }
+        let sourceLineCount = range.upperBound.line - range.lowerBound.line + 1
+        let codeLineCount = max(1, codeBlock.code.components(separatedBy: "\n").count)
+        let firstLine = range.lowerBound.line + sourceLineOffset
+        return sourceLineCount > codeLineCount ? firstLine + 1 : firstLine
+    }
+
+    private func addingSourceLine(
+        to html: String,
+        for markup: any Markup,
+        selectionLine: Int? = nil
+    ) -> String {
+        let attribute = sourceLineAttribute(for: markup, selectionLine: selectionLine)
         guard attribute.isEmpty == false,
               let tagEnd = html.firstIndex(of: ">") else {
             return html

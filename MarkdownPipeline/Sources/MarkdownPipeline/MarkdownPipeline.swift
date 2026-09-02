@@ -54,12 +54,13 @@ public struct MarkdownPipeline: Sendable {
                     context: mergedContext
                 )
             }
+            let frontMatterHTML = extraction.frontMatter.map(FrontMatterRenderer.render) ?? ""
             let contribution = try PipelineInstrumentation.measure("PluginAssets") {
                 try coordinator.contribution()
             }
             let html = try PipelineInstrumentation.measure("HTMLDocumentAssembly") {
                 try HTMLEmitter().render(
-                    bodyHTML: renderedBody.html,
+                    bodyHTML: frontMatterHTML + renderedBody.html,
                     title: mergedContext.title,
                     theme: mergedContext.theme,
                     additionalStyles: contribution.styles,
@@ -73,6 +74,7 @@ public struct MarkdownPipeline: Sendable {
                 title: mergedContext.title,
                 baseURL: mergedContext.baseURL,
                 containsWikiLinks: contribution.containsWikiLinks,
+                containsFrontMatter: extraction.frontMatter != nil,
                 resources: contribution.resources,
                 filteredHTMLFragmentCount: renderedBody.filteredHTMLFragmentCount
             )

@@ -33,6 +33,10 @@
     --blockquote-border-dark: #b9b9b9;
     --table-header-background-light: #f6f8fa;
     --table-header-background-dark: #21262d;
+    --frontmatter-background-light: #f7f8fa;
+    --frontmatter-background-dark: #25272b;
+    --frontmatter-chip-light: #e7eef8;
+    --frontmatter-chip-dark: #303d50;
     --search-hit-background-light: rgba(255, 204, 0, 0.45);
     --search-hit-background-dark: rgba(255, 214, 10, 0.34);
     --search-hit-border-light: rgba(179, 128, 0, 0.22);
@@ -54,6 +58,64 @@ body {
     color: var(--text-light);
     background-color: var(--background-light);
     margin: 1rem 2rem;
+}
+
+/* Frontmatter */
+.frontmatter-card {
+    margin-block: 0 1.5rem;
+    border: 1px solid var(--line-light);
+    border-radius: 10px;
+    background: var(--frontmatter-background-light);
+    overflow: hidden;
+}
+
+.frontmatter-card > summary {
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+    min-height: 2.5rem;
+    padding: 0.15rem 0.85rem;
+    cursor: pointer;
+    user-select: none;
+}
+
+.frontmatter-card > summary::-webkit-details-marker { display: none; }
+.frontmatter-card > summary::marker { content: ""; }
+.frontmatter-card > summary:hover { background: rgba(9, 105, 218, 0.06); }
+.frontmatter-card > summary:focus-visible { outline: 2px solid var(--link-light); outline-offset: -3px; }
+.frontmatter-disclosure { width: 0.45rem; height: 0.45rem; flex: 0 0 auto; border-right: 2px solid var(--link-light); border-bottom: 2px solid var(--link-light); transform: rotate(-45deg); transition: transform 120ms ease; }
+.frontmatter-card[open] .frontmatter-disclosure { transform: rotate(45deg); }
+.frontmatter-summary-label { font-size: 0.88rem; font-weight: 650; letter-spacing: 0.01em; }
+.frontmatter-summary-title { min-width: 0; overflow: hidden; font-weight: 550; text-overflow: ellipsis; white-space: nowrap; }
+.frontmatter-summary-count { margin-left: auto; color: var(--blockquote-text-light); font-size: 0.8rem; white-space: nowrap; }
+.frontmatter-card[open] .frontmatter-summary-count { display: none; }
+.frontmatter-print-title { display: none; }
+.frontmatter-content { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.75rem 1.5rem; padding: 0.8rem 1rem 1rem; border-top: 1px solid var(--line-light); }
+.frontmatter-label { color: var(--blockquote-text-light); font-size: 0.72rem; font-weight: 600; letter-spacing: 0.025em; text-transform: uppercase; }
+.frontmatter-field, .frontmatter-prose { margin: 0; }
+.frontmatter-prose, .frontmatter-chip-field, .frontmatter-questions, .frontmatter-field:not(.frontmatter-compact-field), .frontmatter-error, .frontmatter-raw, .frontmatter-empty, .frontmatter-generic-root { grid-column: 1 / -1; }
+.frontmatter-prose > .frontmatter-string { display: block; margin-top: 0.3rem; line-height: 1.55; }
+.frontmatter-compact-field { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.4rem 0.8rem; }
+.frontmatter-status { display: inline-flex; padding: 0.12rem 0.55rem; border-radius: 999px; background: var(--frontmatter-chip-light); font-size: 0.82rem; font-weight: 550; }
+.frontmatter-chips { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0.4rem 0 0; padding: 0; list-style: none; }
+.frontmatter-chips > li { padding: 0.18rem 0.6rem; border-radius: 999px; background: var(--frontmatter-chip-light); font-size: 0.82rem; }
+.frontmatter-list { margin-block: 0.4rem 0; padding-left: 1.4rem; }
+.frontmatter-list > li { margin-block: 0.25rem; line-height: 1.45; }
+.frontmatter-map { margin-block: 0.4rem 0; }
+.frontmatter-map-entry { display: grid; grid-template-columns: minmax(7rem, 0.35fr) minmax(0, 1fr); gap: 0.75rem; padding-block: 0.3rem; }
+.frontmatter-map-entry dt { color: var(--blockquote-text-light); font-weight: 550; }
+.frontmatter-map-entry dd { margin: 0; }
+.frontmatter-string { white-space: pre-wrap; }
+.frontmatter-null { color: var(--blockquote-text-light); font-style: italic; }
+.frontmatter-raw { margin-top: 0.75rem; }
+.frontmatter-error { color: #b42318; }
+.frontmatter-empty { color: var(--blockquote-text-light); font-style: italic; }
+
+@media (max-width: 36rem) {
+    .frontmatter-card > summary { flex-wrap: wrap; }
+    .frontmatter-summary-count { width: 100%; margin-left: 1.2rem; }
+    .frontmatter-content { grid-template-columns: 1fr; }
+    .frontmatter-map-entry { grid-template-columns: 1fr; gap: 0.15rem; }
 }
 
 /* Headers */
@@ -957,8 +1019,71 @@ img {
     border-top-color: var(--separator-dark);
 }
 
+:where(:root[data-marklens-theme="dark"]) .frontmatter-card {
+    border-color: var(--line-dark);
+    background: var(--frontmatter-background-dark);
+}
+
+:where(:root[data-marklens-theme="dark"]) .frontmatter-card > summary:hover {
+    background: rgba(88, 166, 255, 0.08);
+}
+
+:where(:root[data-marklens-theme="dark"]) .frontmatter-card > summary:focus-visible {
+    outline-color: var(--link-dark);
+}
+
+:where(:root[data-marklens-theme="dark"]) .frontmatter-disclosure {
+    border-color: var(--link-dark);
+}
+
+:where(:root[data-marklens-theme="dark"]) .frontmatter-content {
+    border-top-color: var(--line-dark);
+}
+
+:where(:root[data-marklens-theme="dark"]) .frontmatter-title {
+    color: var(--header-dark);
+}
+
+:where(:root[data-marklens-theme="dark"]) .frontmatter-label,
+:where(:root[data-marklens-theme="dark"]) .frontmatter-map-entry dt,
+:where(:root[data-marklens-theme="dark"]) .frontmatter-summary-count,
+:where(:root[data-marklens-theme="dark"]) .frontmatter-null,
+:where(:root[data-marklens-theme="dark"]) .frontmatter-empty {
+    color: var(--blockquote-text-dark);
+}
+
+:where(:root[data-marklens-theme="dark"]) .frontmatter-status,
+:where(:root[data-marklens-theme="dark"]) .frontmatter-chips > li {
+    background: var(--frontmatter-chip-dark);
+}
+
 /* Keep print overrides last so they win over the interactive code-block styles. */
 @media print {
+    .frontmatter-card:not([open]) {
+        display: none;
+    }
+
+    .frontmatter-card[open] > summary {
+        display: none;
+    }
+
+    .frontmatter-card[open] .frontmatter-content {
+        border-top: 0;
+    }
+
+    .frontmatter-card[open] .frontmatter-print-title {
+        display: block;
+        grid-column: 1 / -1;
+        color: var(--header-light);
+        font-size: 1.55rem;
+        font-weight: 650;
+        line-height: 1.2;
+    }
+
+    :where(:root[data-marklens-theme="dark"]) .frontmatter-card[open] .frontmatter-print-title {
+        color: var(--header-dark);
+    }
+
     .code-block-virtualized {
         content-visibility: visible;
         contain-intrinsic-block-size: none;

@@ -20,6 +20,7 @@ final class MarkdownDocument: ReferenceFileDocument {
     @Published private(set) var renderedHTML: String
     @Published private(set) var renderedResources: [HTMLResource]
     @Published private(set) var containsWikiLinks: Bool
+    @Published private(set) var containsFrontMatter: Bool
     @Published private(set) var filteredHTMLFragmentCount: Int
     @Published private(set) var htmlContentAdjustmentReason: HTMLContentAdjustmentReason?
     @Published private(set) var renderRevision: Int
@@ -61,6 +62,7 @@ final class MarkdownDocument: ReferenceFileDocument {
         self.renderedHTML = rendering.html
         self.renderedResources = rendering.resources
         self.containsWikiLinks = rendering.containsWikiLinks
+        self.containsFrontMatter = rendering.containsFrontMatter
         self.filteredHTMLFragmentCount = rendering.filteredHTMLFragmentCount
         self.htmlContentAdjustmentReason = rendering.htmlContentAdjustmentReason
         self.renderRevision = 0
@@ -93,6 +95,7 @@ final class MarkdownDocument: ReferenceFileDocument {
         self.renderedHTML = rendering.html
         self.renderedResources = rendering.resources
         self.containsWikiLinks = rendering.containsWikiLinks
+        self.containsFrontMatter = rendering.containsFrontMatter
         self.filteredHTMLFragmentCount = rendering.filteredHTMLFragmentCount
         self.htmlContentAdjustmentReason = rendering.htmlContentAdjustmentReason
         self.renderRevision = 0
@@ -117,6 +120,7 @@ final class MarkdownDocument: ReferenceFileDocument {
         renderedHTML = rendering.html
         renderedResources = rendering.resources
         containsWikiLinks = rendering.containsWikiLinks
+        containsFrontMatter = rendering.containsFrontMatter
         filteredHTMLFragmentCount = rendering.filteredHTMLFragmentCount
         htmlContentAdjustmentReason = rendering.htmlContentAdjustmentReason
         renderRevision += 1
@@ -129,6 +133,7 @@ final class MarkdownDocument: ReferenceFileDocument {
         renderedHTML = rendering.html
         renderedResources = rendering.resources
         containsWikiLinks = rendering.containsWikiLinks
+        containsFrontMatter = rendering.containsFrontMatter
         filteredHTMLFragmentCount = rendering.filteredHTMLFragmentCount
         htmlContentAdjustmentReason = rendering.htmlContentAdjustmentReason
         renderRevision += 1
@@ -141,6 +146,7 @@ final class MarkdownDocument: ReferenceFileDocument {
     ) -> (
         html: String,
         containsWikiLinks: Bool,
+        containsFrontMatter: Bool,
         resources: [HTMLResource],
         filteredHTMLFragmentCount: Int,
         htmlContentAdjustmentReason: HTMLContentAdjustmentReason?
@@ -154,12 +160,13 @@ final class MarkdownDocument: ReferenceFileDocument {
                 return (
                     document.html,
                     document.containsWikiLinks,
+                    document.containsFrontMatter,
                     document.resources,
                     document.filteredHTMLFragmentCount,
                     adjustmentReason
                 )
             }
-            return (renderFailureHTML, false, [], 0, nil)
+            return (renderFailureHTML, false, false, [], 0, nil)
         }
     }
 

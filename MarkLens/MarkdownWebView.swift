@@ -42,6 +42,9 @@ struct MarkdownWebView: PlatformViewRepresentable {
     var findBackwards: Bool
     var findAnchorRequest: Int
     var findSelectionAction: (String) -> Void
+    @Binding var frontMatterExpanded: Bool
+    var sourceEditPositionRequest: UUID?
+    var sourceEditPositionAction: (UUID, Int?) -> Void
     @Binding var scrollPosition: DocumentScrollPosition
     var scrollTarget: DocumentScrollPosition
     var scrollRequest: Int
@@ -70,6 +73,9 @@ struct MarkdownWebView: PlatformViewRepresentable {
         findBackwards: Bool = false,
         findAnchorRequest: Int = 0,
         findSelectionAction: @escaping (String) -> Void = { _ in },
+        frontMatterExpanded: Binding<Bool> = .constant(false),
+        sourceEditPositionRequest: UUID? = nil,
+        sourceEditPositionAction: @escaping (UUID, Int?) -> Void = { _, _ in },
         scrollPosition: Binding<DocumentScrollPosition> = .constant(.top),
         scrollTarget: DocumentScrollPosition = .top,
         scrollRequest: Int = 0
@@ -94,6 +100,9 @@ struct MarkdownWebView: PlatformViewRepresentable {
         self.findBackwards = findBackwards
         self.findAnchorRequest = findAnchorRequest
         self.findSelectionAction = findSelectionAction
+        self._frontMatterExpanded = frontMatterExpanded
+        self.sourceEditPositionRequest = sourceEditPositionRequest
+        self.sourceEditPositionAction = sourceEditPositionAction
         self._scrollPosition = scrollPosition
         self.scrollTarget = scrollTarget
         self.scrollRequest = scrollRequest
@@ -117,6 +126,7 @@ struct MarkdownWebView: PlatformViewRepresentable {
         resourceHandler.update(resources: resources)
         config.setURLSchemeHandler(resourceHandler, forURLScheme: Self.resourceScheme)
         config.userContentController.add(context.coordinator, name: Self.scrollMessageHandler)
+        config.userContentController.add(context.coordinator, name: Self.frontMatterMessageHandler)
         config.userContentController.addUserScript(WKUserScript(
             source: Self.scrollPositionScript,
             injectionTime: .atDocumentEnd,
@@ -155,7 +165,10 @@ struct MarkdownWebView: PlatformViewRepresentable {
 #endif
         context.coordinator.authorizeInternalLoad()
         context.coordinator.beginWebViewLoad()
-        webView.loadHTMLString(html, baseURL: baseURL)
+        webView.loadHTMLString(
+            FrontMatterHTMLState.applying(expanded: frontMatterExpanded, to: html),
+            baseURL: baseURL
+        )
 
         return webView
     }
@@ -176,6 +189,7 @@ struct MarkdownWebView: PlatformViewRepresentable {
         view.navigationDelegate = nil
         view.uiDelegate = nil
         view.configuration.userContentController.removeScriptMessageHandler(forName: Self.scrollMessageHandler)
+        view.configuration.userContentController.removeScriptMessageHandler(forName: Self.frontMatterMessageHandler)
         coordinator.searchGeneration += 1
         coordinator.cancelOutput()
         coordinator.removeReloadSnapshot()
@@ -245,6 +259,8 @@ struct MarkdownWebView: PlatformViewRepresentable {
         var pendingOutputRequest: RenderedDocumentOutputRequest?
         var activeOutputRequest: RenderedDocumentOutputRequest?
         var latestScrollRequest = 0
+        var latestFrontMatterExpanded: Bool?
+        var latestSourceEditPositionRequest: UUID?
         weak var reloadSnapshotView: PlatformImageView?
         var reloadGeneration = 0
         private var isInternalLoadAuthorized = false
@@ -328,6 +344,7 @@ struct MarkdownWebView: PlatformViewRepresentable {
             let findAnchorChanged = parent.findAnchorRequest != latestFindAnchorRequest
             let customCSSChanged = parent.customCSS != latestCustomCSS
             let scrollChanged = parent.scrollRequest != latestScrollRequest
+            let frontMatterChanged = parent.frontMatterExpanded != latestFrontMatterExpanded
             let restoreAfterSearch: (() -> Void)? = scrollChanged ? { [weak self] in
                 self?.restoreScrollPosition()
             } : nil
@@ -375,8 +392,12 @@ struct MarkdownWebView: PlatformViewRepresentable {
                 if scrollChanged && searchUpdateScheduled == false {
                     restoreScrollPosition()
                 }
+                if frontMatterChanged {
+                    applyFrontMatterState()
+                }
             }
 
+            captureSourceEditPositionIfNeeded()
             handleOutputRequest()
         }
 
@@ -384,8 +405,14 @@ struct MarkdownWebView: PlatformViewRepresentable {
             _ userContentController: WKUserContentController,
             didReceive message: WKScriptMessage
         ) {
-            guard message.name == MarkdownWebView.scrollMessageHandler,
-                  let value = message.body as? [String: Any] else { return }
+            guard let value = message.body as? [String: Any] else { return }
+            if message.name == MarkdownWebView.frontMatterMessageHandler {
+                guard let expanded = value["expanded"] as? Bool else { return }
+                latestFrontMatterExpanded = expanded
+                Task { @MainActor in self.parent.frontMatterExpanded = expanded }
+                return
+            }
+            guard message.name == MarkdownWebView.scrollMessageHandler else { return }
 
             let line = Self.optionalIntValue(value["line"])
             let progress = (value["progress"] as? NSNumber)?.doubleValue ?? 0
@@ -405,6 +432,29 @@ struct MarkdownWebView: PlatformViewRepresentable {
             )
             Task { @MainActor in
                 self.parent.scrollPosition = position
+            }
+        }
+
+        private func applyFrontMatterState() {
+            latestFrontMatterExpanded = parent.frontMatterExpanded
+            guard let webView else { return }
+            webView.evaluateJavaScript(
+                "document.getElementById('marklens-frontmatter')?.toggleAttribute('open', \(parent.frontMatterExpanded ? "true" : "false"));"
+            )
+        }
+
+        private func captureSourceEditPositionIfNeeded() {
+            guard let request = parent.sourceEditPositionRequest,
+                  request != latestSourceEditPositionRequest else { return }
+            latestSourceEditPositionRequest = request
+            guard isPageReady, let webView else {
+                parent.sourceEditPositionAction(request, nil)
+                return
+            }
+            webView.evaluateJavaScript("window.MarkLensScroll.selectionStartLine();") { [weak self] value, _ in
+                guard let self else { return }
+                let line = Self.optionalIntValue(value)
+                Task { @MainActor in self.parent.sourceEditPositionAction(request, line) }
             }
         }
 
@@ -443,7 +493,10 @@ struct MarkdownWebView: PlatformViewRepresentable {
             guard animated, reloadAnimationsEnabled else {
                 authorizeInternalLoad()
                 beginWebViewLoad()
-                webView.loadHTMLString(html, baseURL: baseURL)
+                webView.loadHTMLString(
+                    FrontMatterHTMLState.applying(expanded: parent.frontMatterExpanded, to: html),
+                    baseURL: baseURL
+                )
                 return
             }
 
@@ -457,7 +510,10 @@ struct MarkdownWebView: PlatformViewRepresentable {
                 }
                 self.authorizeInternalLoad()
                 self.beginWebViewLoad()
-                webView.loadHTMLString(html, baseURL: baseURL)
+                webView.loadHTMLString(
+                    FrontMatterHTMLState.applying(expanded: parent.frontMatterExpanded, to: html),
+                    baseURL: baseURL
+                )
             }
         }
 
@@ -962,6 +1018,7 @@ struct MarkdownWebView: PlatformViewRepresentable {
     private static let localImageScheme = "marklens-local-image"
     private static let resourceScheme = "marklens-resource"
     private static let scrollMessageHandler = "marklensScrollPosition"
+    private static let frontMatterMessageHandler = "marklensFrontMatter"
 
     static let scrollPositionScript = """
         (() => {
@@ -1006,22 +1063,35 @@ struct MarkdownWebView: PlatformViewRepresentable {
                 let previousAnchor = null;
                 let nextAnchor = null;
                 let offset = 0;
-                let closestDistance = Infinity;
+                const candidates = [];
                 visibleAnchors.forEach(element => {
                     const rect = element.getBoundingClientRect();
                     if (rect.bottom < 0 || rect.top > innerHeight) return;
-                    const distance = Math.abs(rect.top);
-                    if (distance < closestDistance) {
-                        const sourceAnchor = anchorByElement.get(element);
-                        closestDistance = distance;
-                        line = sourceAnchor?.line ?? null;
-                        anchor = sourceAnchor?.identity ?? null;
-                        occurrence = sourceAnchor?.occurrence ?? null;
-                        previousAnchor = sourceAnchors[sourceAnchor?.index - 1]?.identity ?? null;
-                        nextAnchor = sourceAnchors[sourceAnchor?.index + 1]?.identity ?? null;
-                        offset = rect.top;
+                    let depth = 0;
+                    for (let parent = element.parentElement; parent; parent = parent.parentElement) {
+                        depth += 1;
                     }
+                    candidates.push({ element, rect, depth });
                 });
+                const covering = candidates
+                    .filter(candidate => candidate.rect.top <= 0 && candidate.rect.bottom > 0)
+                    .sort((left, right) => right.depth - left.depth);
+                const below = candidates
+                    .filter(candidate => candidate.rect.top >= 0)
+                    .sort((left, right) => left.rect.top - right.rect.top || right.depth - left.depth);
+                const above = candidates
+                    .filter(candidate => candidate.rect.bottom <= 0)
+                    .sort((left, right) => right.rect.bottom - left.rect.bottom || right.depth - left.depth);
+                const candidate = covering[0] || below[0] || above[0] || null;
+                if (candidate) {
+                    const sourceAnchor = anchorByElement.get(candidate.element);
+                    line = sourceAnchor?.line ?? null;
+                    anchor = sourceAnchor?.identity ?? null;
+                    occurrence = sourceAnchor?.occurrence ?? null;
+                    previousAnchor = sourceAnchors[sourceAnchor?.index - 1]?.identity ?? null;
+                    nextAnchor = sourceAnchors[sourceAnchor?.index + 1]?.identity ?? null;
+                    offset = candidate.rect.top;
+                }
                 window.webkit.messageHandlers.marklensScrollPosition.postMessage({
                     line: Number.isFinite(line) ? line : null,
                     progress: progress(),
@@ -1171,6 +1241,36 @@ struct MarkdownWebView: PlatformViewRepresentable {
             });
 
             window.MarkLensScroll = {
+                selectionStartLine() {
+                    const selection = window.getSelection?.();
+                    if (!selection || selection.rangeCount === 0 || selection.isCollapsed) return null;
+                    const selectionRange = selection.getRangeAt(0);
+                    const container = selectionRange.startContainer;
+                    let element = container?.nodeType === 1 ? container : container?.parentElement;
+                    while (element) {
+                        const line = Number(element.dataset?.marklensSourceLine);
+                        if (Number.isFinite(line)) {
+                            const selectionLine = Number(element.dataset?.marklensSelectionLine);
+                            const firstTextLine = Number.isFinite(selectionLine) ? selectionLine : line;
+                            const endLine = Number(element.dataset?.marklensSourceEndLine);
+                            if (Number.isFinite(endLine) && endLine > firstTextLine && document.createRange) {
+                                try {
+                                    const prefix = document.createRange();
+                                    prefix.setStart(element, 0);
+                                    prefix.setEnd(container, selectionRange.startOffset);
+                                    const textBreaks = (prefix.toString().match(/\\n/g) || []).length;
+                                    const fragment = prefix.cloneContents?.();
+                                    const renderedBreaks = fragment?.querySelectorAll?.('br').length || 0;
+                                    const lineOffset = textBreaks + renderedBreaks;
+                                    return Math.min(firstTextLine + lineOffset, endLine);
+                                } catch (_) {}
+                            }
+                            return firstTextLine;
+                        }
+                        element = element.parentElement;
+                    }
+                    return null;
+                },
                 restore(position) {
                     activeRestoration = position;
                     clearTimeout(restorationTimeout);

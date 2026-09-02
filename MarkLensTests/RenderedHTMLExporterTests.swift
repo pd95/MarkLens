@@ -104,6 +104,51 @@ final class RenderedHTMLExporterTests: XCTestCase {
         XCTAssertFalse(exported.contains(resource.url.absoluteString))
     }
 
+    func testStandaloneHTMLOmitsCollapsedFrontMatter() throws {
+        let document = try MarkdownPipeline.defaultHTML().renderHTML(from: .string("""
+        ---
+        title: Metadata title
+        tags: [one, two]
+        ---
+        # Body title
+        """))
+
+        let exported = try RenderedHTMLExporter.standaloneHTML(
+            html: document.html,
+            resources: document.resources,
+            customCSS: "",
+            sourceURL: nil,
+            frontMatterExpanded: false
+        )
+
+        XCTAssertFalse(exported.contains("marklens-frontmatter:start"))
+        XCTAssertFalse(exported.contains("id=\"marklens-frontmatter\""))
+        XCTAssertTrue(exported.contains("Body title"))
+    }
+
+    func testStandaloneHTMLIncludesExpandedInteractiveFrontMatter() throws {
+        let document = try MarkdownPipeline.defaultHTML().renderHTML(from: .string("""
+        ---
+        title: Metadata title
+        ---
+        Body
+        """))
+
+        let exported = try RenderedHTMLExporter.standaloneHTML(
+            html: document.html,
+            resources: document.resources,
+            customCSS: "",
+            sourceURL: nil,
+            frontMatterExpanded: true
+        )
+
+        XCTAssertTrue(exported.contains("<details id=\"marklens-frontmatter\" class=\"frontmatter-card\" open>"))
+        XCTAssertTrue(exported.contains("Metadata title"))
+        XCTAssertTrue(exported.contains("<summary data-marklens-source-line=\"1\">"))
+        XCTAssertTrue(exported.contains("class=\"frontmatter-print-title\""))
+        XCTAssertTrue(exported.contains(".frontmatter-card[open] .frontmatter-print-title"))
+    }
+
     @MainActor
     func testStandaloneHTMLRendersMermaidInWebView() async throws {
         let pipeline = MarkdownPipeline(plugins: [.mermaid()])

@@ -5,6 +5,7 @@ public struct HTMLDocument {
     public let title: String?
     public let baseURL: URL?
     public let containsWikiLinks: Bool
+    public let containsFrontMatter: Bool
     public let resources: [HTMLResource]
     public let filteredHTMLFragmentCount: Int
 
@@ -13,6 +14,7 @@ public struct HTMLDocument {
         title: String?,
         baseURL: URL?,
         containsWikiLinks: Bool = false,
+        containsFrontMatter: Bool = false,
         resources: [HTMLResource] = [],
         filteredHTMLFragmentCount: Int = 0
     ) {
@@ -20,6 +22,7 @@ public struct HTMLDocument {
         self.title = title
         self.baseURL = baseURL
         self.containsWikiLinks = containsWikiLinks
+        self.containsFrontMatter = containsFrontMatter
         self.resources = resources
         self.filteredHTMLFragmentCount = filteredHTMLFragmentCount
     }

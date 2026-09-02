@@ -7,9 +7,11 @@ nonisolated struct RenderedHTMLExporter {
         resources: [HTMLResource],
         customCSS: String,
         sourceURL: URL?,
+        frontMatterExpanded: Bool,
         to destinationURL: URL
     ) throws {
-        var result = applying(customCSS: customCSS, to: html)
+        var result = preparingFrontMatter(in: html, expanded: frontMatterExpanded)
+        result = applying(customCSS: customCSS, to: result)
         result = inline(resources: resources, in: result)
         result = try embeddingLocalImages(in: result, relativeTo: sourceURL)
         try result.write(to: destinationURL, atomically: true, encoding: .utf8)
@@ -19,11 +21,19 @@ nonisolated struct RenderedHTMLExporter {
         html: String,
         resources: [HTMLResource],
         customCSS: String,
-        sourceURL: URL?
+        sourceURL: URL?,
+        frontMatterExpanded: Bool = false
     ) throws -> String {
-        var result = applying(customCSS: customCSS, to: html)
+        var result = preparingFrontMatter(in: html, expanded: frontMatterExpanded)
+        result = applying(customCSS: customCSS, to: result)
         result = inline(resources: resources, in: result)
         return try embeddingLocalImages(in: result, relativeTo: sourceURL)
+    }
+
+    private static func preparingFrontMatter(in html: String, expanded: Bool) -> String {
+        expanded
+            ? FrontMatterHTMLState.applying(expanded: true, to: html)
+            : FrontMatterHTMLState.removingFrontMatter(from: html)
     }
 
     private static func applying(customCSS: String, to html: String) -> String {

@@ -365,7 +365,9 @@ struct MarkdownPipelineHTMLRenderingTests {
         """
         let pipeline = MarkdownPipeline()
         let document = try pipeline.render(input: .string(input), context: PipelineContext())
-        #expect(document.html.contains("<ul data-marklens-source-line=\"1\">"))
+        #expect(document.html.contains(
+            "<ul data-marklens-source-line=\"1\" data-marklens-source-end-line=\"3\">"
+        ))
         #expect(document.html.contains("data-marklens-source-line=\"1\">First"))
         #expect(document.html.contains("<input type=\"checkbox\" disabled checked>"))
         #expect(document.html.contains("<input type=\"checkbox\" disabled>"))
@@ -391,13 +393,13 @@ struct MarkdownPipelineHTMLRenderingTests {
         )
 
         #expect(document.html.contains(
-            "<p data-marklens-source-line=\"1\">Soft line\ncontinues.</p>"
+            "<p data-marklens-source-line=\"1\" data-marklens-source-end-line=\"2\">Soft line\ncontinues.</p>"
         ))
         #expect(document.html.contains(
-            "<p data-marklens-source-line=\"4\">Hard spaces.<br>next line.</p>"
+            "<p data-marklens-source-line=\"4\" data-marklens-source-end-line=\"5\">Hard spaces.<br>next line.</p>"
         ))
         #expect(document.html.contains(
-            "<p data-marklens-source-line=\"7\">Hard slash.<br>next again.</p>"
+            "<p data-marklens-source-line=\"7\" data-marklens-source-end-line=\"8\">Hard slash.<br>next again.</p>"
         ))
     }
 
@@ -555,6 +557,23 @@ struct MarkdownPipelineHTMLRenderingTests {
         #expect(document.html.contains("```swift"))
         #expect(document.html.contains("let value = 1"))
         #expect(document.html.contains("</code></pre>"))
+    }
+
+    @Test func fencedCodeMapsSelectionToItsFirstContentLine() throws {
+        let input = """
+        ```swift
+        let first = 1
+        let second = 2
+        ```
+        """
+        let document = try MarkdownPipeline().render(
+            input: .string(input),
+            context: PipelineContext(enableCodeHighlighting: false)
+        )
+
+        #expect(document.html.contains(
+            "<pre data-marklens-source-line=\"1\" data-marklens-selection-line=\"2\" data-marklens-source-end-line=\"4\">"
+        ))
     }
 
     @Test func rendersMarkdownCodeBlockContainingBashFenceAsLiteralText() throws {

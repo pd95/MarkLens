@@ -270,6 +270,12 @@ private struct MarkLensAppHandle {
             (sourceEditor.value as? String)?.contains("# Welcome to MarkLens") == true,
             "Expected File → New to use the Markdown starter."
         )
+        let focusMarker = "editor-focus-check"
+        app.typeText(focusMarker)
+        XCTAssertTrue(
+            (sourceEditor.value as? String)?.contains(focusMarker) == true,
+            "Expected source editing to begin with keyboard focus in the editor."
+        )
     }
 
     func verifyExternalRefreshPreservesPreviewPosition() throws {

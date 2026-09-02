@@ -207,29 +207,6 @@ struct InstalledReleaseNotesView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 10) {
-                Image(systemName: "sparkles")
-                    .font(.title2)
-                    .foregroundStyle(Color.accentColor)
-                    .accessibilityHidden(true)
-
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(releaseNotesTitle)
-                        .font(.title2.weight(.semibold))
-
-                    if notes.showsFullChangelog {
-                        Text("Complete development changelog")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                    } else if let previousVersion = notes.previousDisplayVersion {
-                        Text("Updated from MarkLens \(previousVersion)")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-            }
-
-            Divider()
 
             ReleaseNotesContentView(
                 markdown: notes.markdown,
@@ -251,6 +228,47 @@ struct InstalledReleaseNotesView: View {
         }
         .padding()
         .frame(minWidth: 520, minHeight: 520)
+        .toolbar {
+            releaseNotesToolbar
+        }
+    }
+
+    @ToolbarContentBuilder
+    private var releaseNotesToolbar: some ToolbarContent {
+        if #available(macOS 26.0, *) {
+            ToolbarItem(placement: .principal) {
+                releaseNotesHeader
+            }
+            .sharedBackgroundVisibility(.hidden)
+        } else {
+            ToolbarItem(placement: .principal) {
+                releaseNotesHeader
+            }
+        }
+    }
+
+    private var releaseNotesHeader: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "sparkles")
+                .font(.title2)
+                .foregroundStyle(Color.accentColor)
+                .accessibilityHidden(true)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(releaseNotesTitle)
+                    .font(.title2.weight(.semibold))
+
+                if notes.showsFullChangelog {
+                    Text("Complete development changelog")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                } else if let previousVersion = notes.previousDisplayVersion {
+                    Text("Updated from MarkLens \(previousVersion)")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
     }
 
     private var releaseNotesTitle: String {

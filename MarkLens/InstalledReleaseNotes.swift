@@ -128,7 +128,6 @@ final class ReleaseNotesCoordinator: ObservableObject {
               notes != nil else {
             return false
         }
-        acknowledgeCurrentRelease()
         automaticPresentationClaimed = true
         shouldPresentAutomatically = false
         return true
@@ -187,6 +186,7 @@ struct InstalledReleaseNotesView: View {
                 Image(systemName: "sparkles")
                     .font(.title2)
                     .foregroundStyle(Color.accentColor)
+                    .accessibilityHidden(true)
 
                 VStack(alignment: .leading, spacing: 3) {
                     Text("What’s New in MarkLens \(notes.displayVersion)")
@@ -205,7 +205,7 @@ struct InstalledReleaseNotesView: View {
             ReleaseNotesContentView(
                 markdown: notes.markdown,
                 contentIdentity: notes.contentIdentity,
-                accessibilityLabel: "Changes in MarkLens \(notes.displayVersion)"
+                accessibilityLabel: releaseNotesAccessibilityLabel
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity)
 
@@ -222,6 +222,13 @@ struct InstalledReleaseNotesView: View {
         }
         .padding()
         .frame(minWidth: 520, minHeight: 520)
+    }
+
+    private var releaseNotesAccessibilityLabel: String {
+        if let previousVersion = notes.previousDisplayVersion {
+            return "Changes since MarkLens \(previousVersion)"
+        }
+        return "Changes in MarkLens \(notes.displayVersion)"
     }
 }
 

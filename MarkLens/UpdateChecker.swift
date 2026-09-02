@@ -307,17 +307,24 @@ final class UpdateChecker: ObservableObject {
         if let mockRelease {
             cachedRelease = mockRelease
             availableRelease = mockRelease
-        } else if let data = defaults.data(forKey: Self.cachedReleaseKey),
-            let release = try? JSONDecoder().decode(AvailableRelease.self, from: data),
-            Self.isTrustedReleaseURL(release.htmlURL),
-            Self.isEligible(
-                release,
-                includesPrereleases: Self.includesPrereleases(in: defaults)
-            )
-        {
-            let trustedRelease = Self.removingUntrustedDownloadURL(from: release)
-            cachedRelease = trustedRelease
-            restoreAvailableRelease(from: trustedRelease)
+        } else {
+            if let data = defaults.data(forKey: Self.cachedReleaseKey),
+               let release = try? JSONDecoder().decode(AvailableRelease.self, from: data),
+               Self.isTrustedReleaseURL(release.htmlURL),
+               Self.isEligible(
+                   release,
+                   includesPrereleases: Self.includesPrereleases(in: defaults)
+               ) {
+                let trustedRelease = Self.removingUntrustedDownloadURL(from: release)
+                cachedRelease = trustedRelease
+                restoreAvailableRelease(from: trustedRelease)
+            } else if defaults.object(forKey: Self.cachedReleaseKey) != nil {
+                // An ETag is only useful with the response it validates. If the
+                // cached release cannot be restored, force the next request to
+                // obtain a complete response instead of accepting a bare 304.
+                defaults.removeObject(forKey: Self.cachedReleaseKey)
+                defaults.removeObject(forKey: Self.etagKey)
+            }
         }
 
         if let suppression = suppressedUpdate,
@@ -444,10 +451,23 @@ final class UpdateChecker: ObservableObject {
         }
 
         do {
-            let response = try await request(urlRequest)
+            var response = try await request(urlRequest)
             guard Task.isCancelled == false,
                   includesPrereleases == Self.includesPrereleases(in: defaults) else {
                 return false
+            }
+            if response.statusCode == 304, cachedRelease == nil {
+                defaults.removeObject(forKey: Self.etagKey)
+                urlRequest.setValue(nil, forHTTPHeaderField: "If-None-Match")
+                response = try await request(urlRequest)
+                guard Task.isCancelled == false,
+                      includesPrereleases == Self.includesPrereleases(in: defaults) else {
+                    return false
+                }
+                guard response.statusCode != 304 else {
+                    markCheckFailed()
+                    return false
+                }
             }
             if response.statusCode == 304 {
                 let enrichedRelease = await changelogEnrichedCachedRelease()

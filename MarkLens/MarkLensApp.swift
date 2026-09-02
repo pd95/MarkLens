@@ -94,6 +94,9 @@ struct MarkLensApp: App {
         Window("What’s New in MarkLens", id: ReleaseNotesCoordinator.windowID) {
             if let notes = releaseNotesCoordinator.notes {
                 InstalledReleaseNotesView(notes: notes)
+                    .onAppear {
+                        releaseNotesCoordinator.acknowledgeCurrentRelease()
+                    }
             } else {
                 ContentUnavailableView(
                     "Release Notes Unavailable",
@@ -141,7 +144,6 @@ private struct ReleaseNotesCommands: Commands {
     var body: some Commands {
         CommandGroup(after: .help) {
             Button("What’s New in MarkLens") {
-                coordinator.acknowledgeCurrentRelease()
                 openWindow(id: ReleaseNotesCoordinator.windowID)
             }
             .disabled(coordinator.notes == nil)

@@ -108,6 +108,11 @@ enum ReleaseChangelog {
             heading.removeFirst()
             heading.removeLast()
         }
+        let unreleasedSuffix = " (Unreleased)"
+        if heading.lowercased().hasSuffix(unreleasedSuffix.lowercased()) {
+            heading.removeLast(unreleasedSuffix.count)
+            heading = heading.trimmingCharacters(in: .whitespaces)
+        }
         return heading.isEmpty ? nil : heading
     }
 

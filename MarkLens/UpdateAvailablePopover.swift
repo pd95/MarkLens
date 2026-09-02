@@ -43,20 +43,28 @@ struct UpdateAvailablePopover: View {
 
             Divider()
 
+            Text(deferralExplanation)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
             HStack {
                 Button("Skip This Version") {
                     onSkipVersion()
                     dismiss()
                 }
                 .accessibilityIdentifier("skipUpdateVersionButton")
+                .accessibilityHint(skipVersionExplanation)
+                .help(skipVersionExplanation)
 
                 Spacer()
 
-                Button("Check Later") {
+                Button("Remind Me Later") {
                     onCheckLater()
                     dismiss()
                 }
                 .accessibilityIdentifier("checkUpdateLaterButton")
+                .accessibilityHint(remindLaterExplanation)
+                .help(remindLaterExplanation)
 
                 Button(primaryActionTitle) {
                     dismiss()
@@ -69,7 +77,7 @@ struct UpdateAvailablePopover: View {
             }
         }
         .padding()
-        .frame(width: 520, height: 560)
+        .frame(width: 520, height: 590)
     }
 
     private var displayInstalledVersion: String {
@@ -84,6 +92,20 @@ struct UpdateAvailablePopover: View {
 
     private var primaryActionURL: URL {
         release.downloadURL ?? release.htmlURL
+    }
+
+    private var deferralExplanation: String {
+        "“Remind Me Later” shows this release after the next update check. "
+            + "Skipping hides it until you check manually or a newer version is found."
+    }
+
+    private var remindLaterExplanation: String {
+        "Hide this notice until the next successful automatic or manual update check."
+    }
+
+    private var skipVersionExplanation: String {
+        "Hide MarkLens \(release.displayVersion) during automatic checks until a newer version "
+            + "is found. A manual check will show it again."
     }
 
 }

@@ -172,9 +172,9 @@ private enum UpdateCheckResult {
         case .refreshFailed(let release):
             return "Unable to refresh. MarkLens \(release.displayVersion) was previously available."
         case .postponed(let version):
-            return "MarkLens \(version) will be checked again later."
+            return "MarkLens \(version) is postponed until the next update check."
         case .skipped(let version):
-            return "MarkLens \(version) is skipped."
+            return "MarkLens \(version) is skipped. Check Now to see this release again."
         case .upToDate:
             return "MarkLens is up to date."
         case .failed:

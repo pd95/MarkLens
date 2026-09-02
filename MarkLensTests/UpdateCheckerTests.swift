@@ -121,6 +121,23 @@ final class UpdateCheckerTests: XCTestCase {
         XCTAssertFalse(notes.contains("Older changes"))
     }
 
+    func testChangesForReleaseRecognizesUnreleasedHeading() throws {
+        let changelog = """
+            ## 1.8.0 (Unreleased)
+
+            - Upcoming changes.
+
+            ## 1.7.0
+
+            - Published changes.
+            """
+
+        let notes = try XCTUnwrap(ReleaseChangelog.changes(in: changelog, for: "v1.8.0"))
+
+        XCTAssertTrue(notes.contains("Upcoming changes"))
+        XCTAssertFalse(notes.contains("Published changes"))
+    }
+
     func testNewerStableReleaseBecomesAvailableAndIsCached() async throws {
         let defaults = makeDefaults()
         let checker = UpdateChecker(
@@ -423,6 +440,54 @@ final class UpdateCheckerTests: XCTestCase {
         XCTAssertNil(checker.suppressedUpdate)
     }
 
+    func testSkippedReleaseRemainsHiddenAfterRestartAndScheduledCheck() async {
+        let defaults = makeDefaults()
+        var currentDate = Date(timeIntervalSince1970: 1_000_000)
+        let firstChecker = UpdateChecker(
+            currentVersion: "1.0.0",
+            releaseTag: "v1.0.0",
+            defaults: defaults,
+            now: { currentDate },
+            request: { request in
+                if Self.isChangelogRequest(request) {
+                    return Self.changelogResponse()
+                }
+                return UpdateHTTPResponse(
+                    data: Self.releaseJSON(tag: "v1.1.0"),
+                    statusCode: 200,
+                    etag: "skipped-etag"
+                )
+            }
+        )
+        let initialCheckSucceeded = await firstChecker.checkNow()
+        XCTAssertTrue(initialCheckSucceeded)
+        firstChecker.skipAvailableVersion()
+
+        let restoredChecker = UpdateChecker(
+            currentVersion: "1.0.0",
+            releaseTag: "v1.0.0",
+            defaults: defaults,
+            now: { currentDate },
+            request: { request in
+                XCTAssertFalse(Self.isChangelogRequest(request))
+                XCTAssertEqual(
+                    request.value(forHTTPHeaderField: "If-None-Match"),
+                    "skipped-etag"
+                )
+                return UpdateHTTPResponse(data: Data(), statusCode: 304, etag: nil)
+            }
+        )
+
+        XCTAssertNil(restoredChecker.availableRelease)
+        XCTAssertEqual(restoredChecker.activeSuppression?.disposition, .skipVersion)
+
+        currentDate.addTimeInterval(8 * 24 * 60 * 60)
+        await restoredChecker.checkIfDue()
+
+        XCTAssertNil(restoredChecker.availableRelease)
+        XCTAssertEqual(restoredChecker.activeSuppression?.tagName, "v1.1.0")
+    }
+
     func testManualCheckRevealsSkippedRelease() async {
         var releaseRequestCount = 0
         let checker = UpdateChecker(
@@ -619,6 +684,47 @@ final class UpdateCheckerTests: XCTestCase {
         XCTAssertEqual(checker.availableRelease?.tagName, "v1.5.0-rc1")
     }
 
+    func testSkippedReleaseSuppressionIsScopedToItsReleaseChannel() async {
+        let defaults = makeDefaults()
+        let checker = UpdateChecker(
+            currentVersion: "1.0.0",
+            releaseTag: "v1.0.0",
+            defaults: defaults,
+            request: { request in
+                if Self.isChangelogRequest(request) {
+                    return Self.changelogResponse()
+                }
+                if defaults.bool(forKey: UpdatePreferences.includesPrereleasesKey) {
+                    return UpdateHTTPResponse(
+                        data: Self.releasesJSON([
+                            Self.releaseObject(tag: "v1.2.0-rc1", prerelease: true)
+                        ]),
+                        statusCode: 200,
+                        etag: nil
+                    )
+                }
+                return UpdateHTTPResponse(
+                    data: Self.releaseJSON(tag: "v1.1.0"),
+                    statusCode: 200,
+                    etag: nil
+                )
+            }
+        )
+
+        let initialCheckSucceeded = await checker.checkNow()
+        XCTAssertTrue(initialCheckSucceeded)
+        checker.skipAvailableVersion()
+        XCTAssertEqual(checker.activeSuppression?.channel, "stable")
+
+        defaults.set(true, forKey: UpdatePreferences.includesPrereleasesKey)
+        XCTAssertNil(checker.activeSuppression)
+        let channelCheckSucceeded = await checker.releaseChannelDidChange()
+        XCTAssertTrue(channelCheckSucceeded)
+
+        XCTAssertEqual(checker.availableRelease?.tagName, "v1.2.0-rc1")
+        XCTAssertNil(checker.activeSuppression)
+    }
+
     func testChannelRefreshFailureRetainsAnEligibleKnownRelease() async {
         let defaults = makeDefaults()
         var requestCount = 0
@@ -704,6 +810,39 @@ final class UpdateCheckerTests: XCTestCase {
             defaults: defaults
         )
         XCTAssertEqual(defaults.string(forKey: "updateChecker.etag"), "current-etag")
+    }
+
+    func testCorruptCachedReleaseClearsItsETagBeforeChecking() async {
+        let defaults = makeDefaults()
+        defaults.set(2, forKey: "updateChecker.cacheSchema")
+        defaults.set(Data("not-json".utf8), forKey: "updateChecker.cachedRelease")
+        defaults.set("orphaned-etag", forKey: "updateChecker.etag")
+        var releaseRequestCount = 0
+        let checker = UpdateChecker(
+            currentVersion: "1.0.0",
+            releaseTag: "v1.0.0",
+            defaults: defaults,
+            request: { request in
+                if Self.isChangelogRequest(request) {
+                    return Self.changelogResponse()
+                }
+                releaseRequestCount += 1
+                XCTAssertNil(request.value(forHTTPHeaderField: "If-None-Match"))
+                return UpdateHTTPResponse(
+                    data: Self.releaseJSON(tag: "v1.1.0"),
+                    statusCode: 200,
+                    etag: "fresh-etag"
+                )
+            }
+        )
+
+        XCTAssertNil(defaults.data(forKey: "updateChecker.cachedRelease"))
+        XCTAssertNil(defaults.string(forKey: "updateChecker.etag"))
+        let checkSucceeded = await checker.checkNow()
+        XCTAssertTrue(checkSucceeded)
+
+        XCTAssertEqual(releaseRequestCount, 1)
+        XCTAssertEqual(checker.availableRelease?.tagName, "v1.1.0")
     }
 
     func testCachedChangelogIsRefilteredForTheInstalledVersion() throws {
@@ -840,6 +979,44 @@ final class UpdateCheckerTests: XCTestCase {
 
         XCTAssertEqual(requestCount, 2)
         XCTAssertEqual(checker.availableRelease?.tagName, "v1.1.0")
+    }
+
+    func testNotModifiedWithoutCachedReleaseRetriesWithoutETag() async {
+        let defaults = makeDefaults()
+        defaults.set(2, forKey: "updateChecker.cacheSchema")
+        defaults.set("orphaned-etag", forKey: "updateChecker.etag")
+        var releaseRequestCount = 0
+        let checker = UpdateChecker(
+            currentVersion: "1.0.0",
+            releaseTag: "v1.0.0",
+            defaults: defaults,
+            request: { request in
+                if Self.isChangelogRequest(request) {
+                    return Self.changelogResponse()
+                }
+                releaseRequestCount += 1
+                if releaseRequestCount == 1 {
+                    XCTAssertEqual(
+                        request.value(forHTTPHeaderField: "If-None-Match"),
+                        "orphaned-etag"
+                    )
+                    return UpdateHTTPResponse(data: Data(), statusCode: 304, etag: nil)
+                }
+                XCTAssertNil(request.value(forHTTPHeaderField: "If-None-Match"))
+                return UpdateHTTPResponse(
+                    data: Self.releaseJSON(tag: "v1.1.0"),
+                    statusCode: 200,
+                    etag: "fresh-etag"
+                )
+            }
+        )
+
+        let checkSucceeded = await checker.checkNow()
+        XCTAssertTrue(checkSucceeded)
+
+        XCTAssertEqual(releaseRequestCount, 2)
+        XCTAssertEqual(checker.availableRelease?.tagName, "v1.1.0")
+        XCTAssertEqual(defaults.string(forKey: "updateChecker.etag"), "fresh-etag")
     }
 
     func testNotModifiedResponseEnrichesLegacyCachedRelease() async throws {

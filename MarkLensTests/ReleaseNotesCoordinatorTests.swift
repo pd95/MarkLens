@@ -17,6 +17,15 @@ final class ReleaseNotesCoordinatorTests: XCTestCase {
 
         XCTAssertTrue(coordinator.claimAutomaticPresentation())
         XCTAssertFalse(coordinator.claimAutomaticPresentation())
+        XCTAssertNil(
+            defaults.string(forKey: ReleaseNotesCoordinator.lastAcknowledgedReleaseKey),
+            "Claiming presentation must not acknowledge a window that has not appeared."
+        )
+
+        let beforeWindowAppears = makeCoordinator(current: "v1.3.0", defaults: defaults)
+        XCTAssertTrue(beforeWindowAppears.shouldPresentAutomatically)
+
+        coordinator.acknowledgeCurrentRelease()
         XCTAssertEqual(
             defaults.string(forKey: ReleaseNotesCoordinator.lastAcknowledgedReleaseKey),
             "v1.3.0"
@@ -45,6 +54,7 @@ final class ReleaseNotesCoordinatorTests: XCTestCase {
         defaults.set("v1.1.0", forKey: ReleaseNotesCoordinator.lastAcknowledgedReleaseKey)
         let first = makeCoordinator(current: "v1.3.0", defaults: defaults)
         XCTAssertTrue(first.claimAutomaticPresentation())
+        first.acknowledgeCurrentRelease()
 
         let restored = makeCoordinator(current: "v1.3.0", defaults: defaults)
 
@@ -63,6 +73,7 @@ final class ReleaseNotesCoordinatorTests: XCTestCase {
         XCTAssertTrue(releaseCandidate.shouldPresentAutomatically)
         XCTAssertEqual(releaseCandidate.notes?.previousReleaseTag, "v1.3.0-rc1")
         XCTAssertTrue(releaseCandidate.claimAutomaticPresentation())
+        releaseCandidate.acknowledgeCurrentRelease()
 
         let sameTagRebuild = makeCoordinator(current: "v1.3.0-rc2", defaults: defaults)
         XCTAssertFalse(sameTagRebuild.shouldPresentAutomatically)
@@ -92,6 +103,11 @@ final class ReleaseNotesCoordinatorTests: XCTestCase {
         XCTAssertTrue(coordinator.claimAutomaticPresentation())
         XCTAssertEqual(
             defaults.string(forKey: ReleaseNotesCoordinator.lastAcknowledgedReleaseKey),
+            "not-a-version"
+        )
+        coordinator.acknowledgeCurrentRelease()
+        XCTAssertEqual(
+            defaults.string(forKey: ReleaseNotesCoordinator.lastAcknowledgedReleaseKey),
             "v1.3.0"
         )
     }
@@ -106,6 +122,13 @@ final class ReleaseNotesCoordinatorTests: XCTestCase {
 
         XCTAssertEqual(coordinator.notes?.markdown, "Release notes are unavailable.")
         XCTAssertTrue(coordinator.shouldPresentAutomatically)
+    }
+
+    func testBundledChangelogCanBeLoadedFromAppBundle() throws {
+        let changelog = try XCTUnwrap(ReleaseNotesCoordinator.loadBundledChangelog())
+
+        XCTAssertTrue(changelog.contains("# Changelog"))
+        XCTAssertTrue(changelog.contains("## 1.8.0"))
     }
 
     func testLocalDevelopmentBuildDoesNotPresentAutomatically() {

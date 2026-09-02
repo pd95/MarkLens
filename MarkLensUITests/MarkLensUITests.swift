@@ -46,7 +46,18 @@ final class MarkLensUITests: XCTestCase {
 
         preview.verifyUpdatePopover()
         capture(app, name: "update-release-notes-popover")
-        preview.checkUpdateLater()
+        preview.remindAboutUpdateLater()
+    }
+
+    @MainActor
+    func testUpdatePopoverCanSkipVersion() throws {
+        let app = XCUIApplication()
+        app.launchEnvironment["MARKLENS_MOCK_UPDATE_VERSION"] = "99.0.0"
+        let preview = app.openDocument(named: "sample", fileExtension: "md")
+        defer { preview.terminate() }
+
+        preview.verifyUpdatePopover()
+        preview.skipAvailableUpdate()
     }
 
     @MainActor
@@ -60,6 +71,8 @@ final class MarkLensUITests: XCTestCase {
 
         preview.verifyInstalledReleaseNotes(includesPreviousRelease: true)
         capture(app, name: "installed-release-notes-window")
+        preview.openInstalledReleaseNotesFromHelp()
+        preview.verifyInstalledReleaseNotesCanScrollToLastIncludedChange()
     }
 
     @MainActor
@@ -72,6 +85,29 @@ final class MarkLensUITests: XCTestCase {
 
         preview.openInstalledReleaseNotesFromHelp()
         preview.verifyInstalledReleaseNotes(includesPreviousRelease: false)
+    }
+
+    @MainActor
+    func testInstalledReleaseNotesAppearOnlyOncePerVersion() throws {
+        let app = XCUIApplication()
+        app.launchEnvironment["MARKLENS_MOCK_INSTALLED_RELEASE_VERSION"] = "97.0.0"
+        app.launchEnvironment["MARKLENS_FORCE_WHATS_NEW"] = "1"
+        let firstLaunch = app.openDocument(named: "sample", fileExtension: "md")
+
+        XCTAssertTrue(
+            firstLaunch.installedReleaseNotesWindow.waitForExistence(timeout: 5),
+            "Expected release notes on the first launch of this version."
+        )
+        firstLaunch.terminate()
+
+        app.launchEnvironment.removeValue(forKey: "MARKLENS_FORCE_WHATS_NEW")
+        let secondLaunch = app.openDocument(named: "sample", fileExtension: "md")
+        defer { secondLaunch.terminate() }
+
+        XCTAssertFalse(
+            secondLaunch.installedReleaseNotesWindow.waitForExistence(timeout: 2),
+            "Expected acknowledged release notes to stay closed on the next launch."
+        )
     }
 
     @MainActor
@@ -279,7 +315,7 @@ private struct MarkLensAppHandle {
         )
         XCTAssertTrue(downloadButton.isHittable, "Expected the download action to remain on-screen.")
         XCTAssertTrue(
-            app.buttons["Check Later"].firstMatch.waitForExistence(timeout: 5),
+            app.buttons["Remind Me Later"].firstMatch.waitForExistence(timeout: 5),
             "Expected the update reminder action."
         )
         XCTAssertTrue(
@@ -296,11 +332,19 @@ private struct MarkLensAppHandle {
         )
     }
 
-    func checkUpdateLater() {
-        app.buttons["Check Later"].firstMatch.click()
+    func remindAboutUpdateLater() {
+        app.buttons["Remind Me Later"].firstMatch.click()
         XCTAssertTrue(
             app.buttons["updateAvailableButton"].firstMatch.waitForNonExistence(timeout: 5),
-            "Expected Check Later to remove the update badge."
+            "Expected Remind Me Later to remove the update badge."
+        )
+    }
+
+    func skipAvailableUpdate() {
+        app.buttons["Skip This Version"].firstMatch.click()
+        XCTAssertTrue(
+            app.buttons["updateAvailableButton"].firstMatch.waitForNonExistence(timeout: 5),
+            "Expected Skip This Version to remove the update badge."
         )
     }
 
@@ -341,6 +385,39 @@ private struct MarkLensAppHandle {
         let menuItem = helpMenu.menus.menuItems["What’s New in MarkLens"].firstMatch
         XCTAssertTrue(menuItem.waitForExistence(timeout: 5), "Expected the What’s New Help command.")
         menuItem.click()
+    }
+
+    func verifyInstalledReleaseNotesCanScrollToLastIncludedChange() {
+        let notesWindow = installedReleaseNotesWindow
+        let lastIncludedChange = notesWindow.staticTexts[
+            "Updated the bundled Mermaid renderer to 11.17.2 to incorporate upstream security fixes."
+        ].firstMatch
+        XCTAssertTrue(
+            lastIncludedChange.waitForExistence(timeout: 5),
+            "Expected the final included changelog entry to be rendered."
+        )
+
+        let notesWebView = notesWindow.webViews.firstMatch
+        XCTAssertTrue(
+            notesWebView.waitForExistence(timeout: 5),
+            "Expected scrollable release-note content."
+        )
+        let notesScrollView = notesWindow.scrollViews.firstMatch
+        XCTAssertTrue(
+            notesScrollView.waitForExistence(timeout: 5),
+            "Expected the release-note content to expose a scroll view."
+        )
+        let initialChangeFrame = lastIncludedChange.frame
+        for _ in 0..<8 where lastIncludedChange.isHittable == false {
+            notesScrollView.scroll(byDeltaX: 0, deltaY: -240)
+            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+        }
+        XCTAssertTrue(
+            lastIncludedChange.isHittable,
+            "Expected scrolling to reveal the last change included in the upgrade range. "
+                + "Initial frame: \(initialChangeFrame); final frame: \(lastIncludedChange.frame); "
+                + "window: \(notesWindow.frame)."
+        )
     }
 
     func openFind() {

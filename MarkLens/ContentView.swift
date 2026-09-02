@@ -33,6 +33,8 @@ struct ContentView: View {
     @Environment(\.scenePhase) private var scenePhase
 #if os(macOS)
     @Environment(\.openDocument) private var openDocument
+    @Environment(\.openWindow) private var openWindow
+    @EnvironmentObject private var releaseNotesCoordinator: ReleaseNotesCoordinator
     @EnvironmentObject private var updateChecker: UpdateChecker
 #endif
     @EnvironmentObject private var localDocumentAccess: LocalDocumentAccess
@@ -352,7 +354,9 @@ struct ContentView: View {
                         .popover(isPresented: $isUpdatePopoverPresented, arrowEdge: .top) {
                             UpdateAvailablePopover(
                                 release: release,
-                                installedVersion: updateChecker.currentVersion
+                                installedVersion: updateChecker.currentVersion,
+                                onCheckLater: updateChecker.checkLater,
+                                onSkipVersion: updateChecker.skipAvailableVersion
                             )
                         }
                     }
@@ -460,6 +464,9 @@ struct ContentView: View {
         }
 #if os(macOS)
         .task {
+            if releaseNotesCoordinator.claimAutomaticPresentation() {
+                openWindow(id: ReleaseNotesCoordinator.windowID)
+            }
             await updateChecker.checkIfDue()
         }
         .onAppear {
@@ -1572,6 +1579,7 @@ private struct PreviewFindBar: View {
     ContentView(document: MarkdownDocument(text: MarkdownDocument.starterText))
         .environmentObject(LocalDocumentAccess())
         .environmentObject(UpdateChecker())
+        .environmentObject(ReleaseNotesCoordinator())
 #else
     ContentView(document: MarkdownDocument(text: MarkdownDocument.starterText))
         .environmentObject(LocalDocumentAccess())

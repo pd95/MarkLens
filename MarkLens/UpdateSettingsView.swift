@@ -135,6 +135,14 @@ struct UpdateSettingsView: View {
         if let release = updateChecker.availableRelease {
             return .updateAvailable(release)
         }
+        if let suppression = updateChecker.activeSuppression {
+            switch suppression.disposition {
+            case .checkLater:
+                return .postponed(suppression.displayVersion)
+            case .skipVersion:
+                return .skipped(suppression.displayVersion)
+            }
+        }
         if updateChecker.lastSuccessfulCheck != nil {
             return .upToDate
         }
@@ -152,6 +160,8 @@ struct UpdateSettingsView: View {
 private enum UpdateCheckResult {
     case updateAvailable(AvailableRelease)
     case refreshFailed(AvailableRelease)
+    case postponed(String)
+    case skipped(String)
     case upToDate
     case failed
 
@@ -161,6 +171,10 @@ private enum UpdateCheckResult {
             return "MarkLens \(release.displayVersion) is available."
         case .refreshFailed(let release):
             return "Unable to refresh. MarkLens \(release.displayVersion) was previously available."
+        case .postponed(let version):
+            return "MarkLens \(version) will be checked again later."
+        case .skipped(let version):
+            return "MarkLens \(version) is skipped."
         case .upToDate:
             return "MarkLens is up to date."
         case .failed:
@@ -172,7 +186,7 @@ private enum UpdateCheckResult {
         switch self {
         case .updateAvailable(let release), .refreshFailed(let release):
             return release
-        case .upToDate, .failed:
+        case .postponed, .skipped, .upToDate, .failed:
             return nil
         }
     }

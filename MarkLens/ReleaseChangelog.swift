@@ -2,6 +2,11 @@
 import Foundation
 
 enum ReleaseChangelog {
+    private struct Section {
+        let version: ReleaseVersion
+        let markdown: String
+    }
+
     static func missedChanges(
         in markdown: String,
         installedVersion: String,
@@ -12,8 +17,25 @@ enum ReleaseChangelog {
             return nil
         }
 
+        return joinedMarkdown(
+            from: sections(in: markdown).filter {
+                $0.version > installed && $0.version <= target
+            }
+        )
+    }
+
+    static func changes(in markdown: String, for releaseTag: String) -> String? {
+        guard let target = ReleaseVersion(baseVersion(from: releaseTag)) else {
+            return nil
+        }
+        return joinedMarkdown(
+            from: sections(in: markdown).filter { $0.version == target }
+        )
+    }
+
+    private static func sections(in markdown: String) -> [Section] {
         let lines = markdown.components(separatedBy: .newlines)
-        var sections: [(version: ReleaseVersion, markdown: String)] = []
+        var sections: [Section] = []
         var sectionStart: Int?
         var sectionVersion: ReleaseVersion?
 
@@ -41,13 +63,14 @@ enum ReleaseChangelog {
             to: &sections
         )
 
-        let selected = sections.compactMap { section in
-            section.version > installed && section.version <= target ? section.markdown : nil
-        }
-        guard selected.isEmpty == false else {
+        return sections
+    }
+
+    private static func joinedMarkdown(from sections: [Section]) -> String? {
+        guard sections.isEmpty == false else {
             return nil
         }
-        return selected.joined(separator: "\n\n")
+        return sections.map(\.markdown).joined(separator: "\n\n")
     }
 
     private static func appendSection(
@@ -55,7 +78,7 @@ enum ReleaseChangelog {
         through end: Int,
         version: ReleaseVersion?,
         lines: [String],
-        to sections: inout [(version: ReleaseVersion, markdown: String)]
+        to sections: inout [Section]
     ) {
         guard let start, let version else {
             return
@@ -66,7 +89,7 @@ enum ReleaseChangelog {
         guard markdown.isEmpty == false else {
             return
         }
-        sections.append((version, markdown))
+        sections.append(Section(version: version, markdown: markdown))
     }
 
     private static func isLevelTwoHeading(_ line: String) -> Bool {

@@ -102,6 +102,25 @@ final class UpdateCheckerTests: XCTestCase {
         XCTAssertFalse(notes.contains("Installed changes"))
     }
 
+    func testChangesForReleaseReturnsOnlyExactBaseVersion() throws {
+        let changelog = """
+            ## 1.3.0
+
+            - Current changes.
+
+            ## 1.2.0
+
+            - Older changes.
+            """
+
+        let notes = try XCTUnwrap(
+            ReleaseChangelog.changes(in: changelog, for: "v1.3.0-rc1")
+        )
+
+        XCTAssertTrue(notes.contains("Current changes"))
+        XCTAssertFalse(notes.contains("Older changes"))
+    }
+
     func testNewerStableReleaseBecomesAvailableAndIsCached() async throws {
         let defaults = makeDefaults()
         let checker = UpdateChecker(
@@ -315,6 +334,201 @@ final class UpdateCheckerTests: XCTestCase {
 
         XCTAssertTrue(checkSucceeded)
         XCTAssertEqual(try XCTUnwrap(checker.availableRelease?.downloadURL).absoluteString, expectedURL)
+    }
+
+    func testCheckLaterPersistsAndSameReleaseReturnsAtNextScheduledCheck() async throws {
+        let defaults = makeDefaults()
+        var currentDate = Date(timeIntervalSince1970: 1_000_000)
+        let firstChecker = UpdateChecker(
+            currentVersion: "1.0.0",
+            releaseTag: "v1.0.0",
+            defaults: defaults,
+            now: { currentDate },
+            request: { request in
+                if Self.isChangelogRequest(request) {
+                    return Self.changelogResponse()
+                }
+                return UpdateHTTPResponse(
+                    data: Self.releaseJSON(tag: "v1.1.0"),
+                    statusCode: 200,
+                    etag: "deferred-etag"
+                )
+            }
+        )
+        let firstCheckSucceeded = await firstChecker.checkNow()
+        XCTAssertTrue(firstCheckSucceeded)
+
+        firstChecker.checkLater()
+
+        XCTAssertNil(firstChecker.availableRelease)
+        XCTAssertEqual(firstChecker.activeSuppression?.disposition, .checkLater)
+
+        let restoredChecker = UpdateChecker(
+            currentVersion: "1.0.0",
+            releaseTag: "v1.0.0",
+            defaults: defaults,
+            now: { currentDate },
+            request: { request in
+                XCTAssertFalse(Self.isChangelogRequest(request))
+                XCTAssertEqual(
+                    request.value(forHTTPHeaderField: "If-None-Match"),
+                    "deferred-etag"
+                )
+                return UpdateHTTPResponse(data: Data(), statusCode: 304, etag: nil)
+            }
+        )
+        XCTAssertNil(restoredChecker.availableRelease)
+
+        currentDate.addTimeInterval(8 * 24 * 60 * 60)
+        await restoredChecker.checkIfDue()
+
+        XCTAssertEqual(restoredChecker.availableRelease?.tagName, "v1.1.0")
+        XCTAssertNil(restoredChecker.suppressedUpdate)
+    }
+
+    func testSkippedReleaseWaitsForNewerScheduledRelease() async {
+        let defaults = makeDefaults()
+        var currentDate = Date(timeIntervalSince1970: 1_000_000)
+        var returnedTag = "v1.1.0"
+        let checker = UpdateChecker(
+            currentVersion: "1.0.0",
+            releaseTag: "v1.0.0",
+            defaults: defaults,
+            now: { currentDate },
+            request: { request in
+                if Self.isChangelogRequest(request) {
+                    return Self.changelogResponse()
+                }
+                return UpdateHTTPResponse(
+                    data: Self.releaseJSON(tag: returnedTag),
+                    statusCode: 200,
+                    etag: nil
+                )
+            }
+        )
+        let firstCheckSucceeded = await checker.checkNow()
+        XCTAssertTrue(firstCheckSucceeded)
+        checker.skipAvailableVersion()
+
+        currentDate.addTimeInterval(8 * 24 * 60 * 60)
+        await checker.checkIfDue()
+        XCTAssertNil(checker.availableRelease)
+        XCTAssertEqual(checker.activeSuppression?.disposition, .skipVersion)
+
+        returnedTag = "v1.2.0"
+        currentDate.addTimeInterval(8 * 24 * 60 * 60)
+        await checker.checkIfDue()
+
+        XCTAssertEqual(checker.availableRelease?.tagName, "v1.2.0")
+        XCTAssertNil(checker.suppressedUpdate)
+    }
+
+    func testManualCheckRevealsSkippedRelease() async {
+        var releaseRequestCount = 0
+        let checker = UpdateChecker(
+            currentVersion: "1.0.0",
+            releaseTag: "v1.0.0",
+            defaults: makeDefaults(),
+            request: { request in
+                if Self.isChangelogRequest(request) {
+                    return Self.changelogResponse()
+                }
+                releaseRequestCount += 1
+                if releaseRequestCount == 1 {
+                    return UpdateHTTPResponse(
+                        data: Self.releaseJSON(tag: "v1.1.0"),
+                        statusCode: 200,
+                        etag: "skipped-etag"
+                    )
+                }
+                return UpdateHTTPResponse(data: Data(), statusCode: 304, etag: nil)
+            }
+        )
+        let firstCheckSucceeded = await checker.checkNow()
+        XCTAssertTrue(firstCheckSucceeded)
+        checker.skipAvailableVersion()
+
+        let succeeded = await checker.checkNow()
+
+        XCTAssertTrue(succeeded)
+        XCTAssertEqual(checker.availableRelease?.tagName, "v1.1.0")
+        XCTAssertNil(checker.suppressedUpdate)
+    }
+
+    func testFailedCheckRetainsSkippedReleaseSuppression() async {
+        var shouldFail = false
+        let checker = UpdateChecker(
+            currentVersion: "1.0.0",
+            releaseTag: "v1.0.0",
+            defaults: makeDefaults(),
+            request: { request in
+                if Self.isChangelogRequest(request) {
+                    return Self.changelogResponse()
+                }
+                if shouldFail {
+                    throw URLError(.notConnectedToInternet)
+                }
+                return UpdateHTTPResponse(
+                    data: Self.releaseJSON(tag: "v1.1.0"),
+                    statusCode: 200,
+                    etag: nil
+                )
+            }
+        )
+        let firstCheckSucceeded = await checker.checkNow()
+        XCTAssertTrue(firstCheckSucceeded)
+        checker.skipAvailableVersion()
+        shouldFail = true
+
+        let failedCheckSucceeded = await checker.checkNow()
+        XCTAssertFalse(failedCheckSucceeded)
+        XCTAssertNil(checker.availableRelease)
+        XCTAssertEqual(checker.activeSuppression?.tagName, "v1.1.0")
+    }
+
+    func testSuppressionSelectedDuringCheckCannotBeOverwrittenByCompletion() async {
+        let defaults = makeDefaults()
+        let cachedRelease = AvailableRelease(
+            tagName: "v1.1.0",
+            name: "MarkLens 1.1.0",
+            body: "Release notes",
+            htmlURL: URL(string: "https://github.com/pd95/MarkLens/releases/tag/v1.1.0")!,
+            prerelease: false
+        )
+        defaults.set(
+            try! JSONEncoder().encode(cachedRelease),
+            forKey: "updateChecker.cachedRelease"
+        )
+        defaults.set(2, forKey: "updateChecker.cacheSchema")
+        let requestStarted = TestGate()
+        let allowResponse = TestGate()
+        let checker = UpdateChecker(
+            currentVersion: "1.0.0",
+            releaseTag: "v1.0.0",
+            defaults: defaults,
+            request: { request in
+                if Self.isChangelogRequest(request) {
+                    return Self.changelogResponse()
+                }
+                await requestStarted.open()
+                await allowResponse.wait()
+                return UpdateHTTPResponse(
+                    data: Self.releaseJSON(tag: "v1.1.0"),
+                    statusCode: 200,
+                    etag: nil
+                )
+            }
+        )
+
+        let check = Task { await checker.checkNow() }
+        await requestStarted.wait()
+        checker.skipAvailableVersion()
+        await allowResponse.open()
+        let succeeded = await check.value
+
+        XCTAssertTrue(succeeded)
+        XCTAssertNil(checker.availableRelease)
+        XCTAssertEqual(checker.activeSuppression?.disposition, .skipVersion)
     }
 
     func testCurrentOrOlderReleaseDoesNotBecomeAvailable() async {

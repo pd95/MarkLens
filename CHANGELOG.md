@@ -2,6 +2,7 @@
 
 ## 1.7.0
 
+- Added persistent “Check Later” and “Skip This Version” update choices, plus offline What’s New notes on first launch after installation or upgrade.
 - Expanded update notifications with a scrollable view of every release missed since the installed version and a direct download link for the release ZIP.
 - Added Security & Privacy controls for raw HTML, remote resources, Mermaid diagrams, linked local images, and automatic update checks, with safer defaults for untrusted document content.
 - Hardened rendered previews with raw HTML sanitization, a nonce-based content security policy, ephemeral browser data, and stricter navigation and resource-loading boundaries.

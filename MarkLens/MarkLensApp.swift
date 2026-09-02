@@ -14,6 +14,7 @@ import AppKit
 struct MarkLensApp: App {
     @StateObject private var localDocumentAccess = LocalDocumentAccess()
 #if os(macOS)
+    @StateObject private var releaseNotesCoordinator = ReleaseNotesCoordinator()
     @StateObject private var updateChecker = UpdateChecker()
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
 #endif
@@ -35,6 +36,7 @@ struct MarkLensApp: App {
             ContentView(document: file.document, fileURL: file.fileURL)
                 .environmentObject(localDocumentAccess)
 #if os(macOS)
+                .environmentObject(releaseNotesCoordinator)
                 .environmentObject(updateChecker)
                 .onAppear {
                     // Make sure the app stops after the last window has been closed
@@ -45,6 +47,8 @@ struct MarkLensApp: App {
         .defaultSize(.defaultWindowSize)
 #if os(macOS)
         .commands {
+            ReleaseNotesCommands(coordinator: releaseNotesCoordinator)
+
             CommandGroup(after: .saveItem) {
                 Button {
                     exportAction?.run()
@@ -87,6 +91,21 @@ struct MarkLensApp: App {
         }
 #endif
 #if os(macOS)
+        Window("What’s New in MarkLens", id: ReleaseNotesCoordinator.windowID) {
+            if let notes = releaseNotesCoordinator.notes {
+                InstalledReleaseNotesView(notes: notes)
+            } else {
+                ContentUnavailableView(
+                    "Release Notes Unavailable",
+                    systemImage: "doc.text"
+                )
+                .frame(minWidth: 520, minHeight: 520)
+            }
+        }
+        .defaultSize(width: 620, height: 620)
+        .defaultLaunchBehavior(.suppressed)
+        .restorationBehavior(.disabled)
+
         Settings {
             MarkLensSettingsView()
                 .environmentObject(localDocumentAccess)
@@ -113,3 +132,20 @@ struct MarkLensApp: App {
     }
 #endif
 }
+
+#if os(macOS)
+private struct ReleaseNotesCommands: Commands {
+    @Environment(\.openWindow) private var openWindow
+    @ObservedObject var coordinator: ReleaseNotesCoordinator
+
+    var body: some Commands {
+        CommandGroup(after: .help) {
+            Button("What’s New in MarkLens") {
+                coordinator.acknowledgeCurrentRelease()
+                openWindow(id: ReleaseNotesCoordinator.windowID)
+            }
+            .disabled(coordinator.notes == nil)
+        }
+    }
+}
+#endif

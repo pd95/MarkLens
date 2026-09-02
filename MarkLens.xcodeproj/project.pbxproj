@@ -13,6 +13,7 @@
 		17CD185A2F08337200899189 /* QuickLookPreview_macOS.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 17CD184B2F08337100899189 /* QuickLookPreview_macOS.appex */; platformFilters = (macos, ); settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		17CD18882F0862FD00899189 /* Markdown in Frameworks */ = {isa = PBXBuildFile; productRef = 17CD18872F0862FD00899189 /* Markdown */; };
 		17CD188A2F08632100899189 /* Markdown in Frameworks */ = {isa = PBXBuildFile; productRef = 17CD18892F08632100899189 /* Markdown */; };
+		A20000012FC1000000000001 /* CHANGELOG.md in Resources */ = {isa = PBXBuildFile; fileRef = 172772F52FBA65D9003F7E82 /* CHANGELOG.md */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -401,6 +402,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A20000012FC1000000000001 /* CHANGELOG.md in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

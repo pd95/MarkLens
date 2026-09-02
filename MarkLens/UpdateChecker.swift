@@ -201,6 +201,26 @@ struct AvailableRelease: Codable, Equatable {
     }
 }
 
+enum UpdateSuppressionDisposition: String, Codable, Equatable {
+    case checkLater
+    case skipVersion
+}
+
+struct UpdateSuppression: Codable, Equatable {
+    let tagName: String
+    let channel: String
+    let disposition: UpdateSuppressionDisposition
+
+    var displayVersion: String {
+        tagName.first?.lowercased() == "v" ? String(tagName.dropFirst()) : tagName
+    }
+}
+
+private enum UpdateCheckTrigger {
+    case scheduled
+    case explicit
+}
+
 struct UpdateHTTPResponse {
     let data: Data
     let statusCode: Int
@@ -214,6 +234,7 @@ final class UpdateChecker: ObservableObject {
     @Published private(set) var availableRelease: AvailableRelease?
     @Published private(set) var lastSuccessfulCheck: Date?
     @Published private(set) var lastCheckFailed = false
+    @Published private(set) var suppressedUpdate: UpdateSuppression?
 
     private static let stableReleaseURL = URL(
         string: "https://api.github.com/repos/pd95/MarkLens/releases/latest"
@@ -232,6 +253,7 @@ final class UpdateChecker: ObservableObject {
     private static let etagKey = "updateChecker.etag"
     private static let cacheSchemaKey = "updateChecker.cacheSchema"
     private static let cacheSchemaVersion = 2
+    private static let suppressedUpdateKey = "updateChecker.suppressedUpdate"
 
     let currentVersion: String
     private let automaticChecksAvailable: Bool
@@ -239,8 +261,10 @@ final class UpdateChecker: ObservableObject {
     private let defaults: UserDefaults
     private let now: () -> Date
     private let request: HTTPRequest
+    private var cachedRelease: AvailableRelease?
     private var activeCheck: Task<Bool, Never>?
     private var activeCheckID = 0
+    private var suppressionGeneration = 0
 
     init(
         currentVersion: String = BuildInfo.tagVersion,
@@ -272,7 +296,16 @@ final class UpdateChecker: ObservableObject {
             ) as? Date
         }
 
+        if let data = defaults.data(forKey: Self.suppressedUpdateKey),
+           let suppression = try? JSONDecoder().decode(UpdateSuppression.self, from: data),
+           ReleaseVersion(suppression.tagName) != nil {
+            suppressedUpdate = suppression
+        } else {
+            defaults.removeObject(forKey: Self.suppressedUpdateKey)
+        }
+
         if let mockRelease {
+            cachedRelease = mockRelease
             availableRelease = mockRelease
         } else if let data = defaults.data(forKey: Self.cachedReleaseKey),
             let release = try? JSONDecoder().decode(AvailableRelease.self, from: data),
@@ -283,9 +316,13 @@ final class UpdateChecker: ObservableObject {
             )
         {
             let trustedRelease = Self.removingUntrustedDownloadURL(from: release)
-            availableRelease = Self.isNewer(trustedRelease.tagName, than: self.currentVersion)
-                ? trustedRelease
-                : nil
+            cachedRelease = trustedRelease
+            restoreAvailableRelease(from: trustedRelease)
+        }
+
+        if let suppression = suppressedUpdate,
+           Self.isNewer(suppression.tagName, than: self.currentVersion) == false {
+            clearSuppression()
         }
     }
 
@@ -314,7 +351,7 @@ final class UpdateChecker: ObservableObject {
             guard let self else {
                 return false
             }
-            return await self.performCheck()
+            return await self.performCheck(trigger: .scheduled)
         }
         activeCheck = task
         _ = await task.value
@@ -336,7 +373,12 @@ final class UpdateChecker: ObservableObject {
         }
 
         if let activeCheck {
-            return await activeCheck.value
+            let startingSuppressionGeneration = suppressionGeneration
+            let succeeded = await activeCheck.value
+            if succeeded, suppressionGeneration == startingSuppressionGeneration {
+                revealCachedReleaseAfterExplicitCheck()
+            }
+            return succeeded
         }
 
         defaults.set(now(), forKey: Self.lastAttemptKey)
@@ -346,7 +388,7 @@ final class UpdateChecker: ObservableObject {
             guard let self else {
                 return false
             }
-            return await self.performCheck()
+            return await self.performCheck(trigger: .explicit)
         }
         activeCheck = task
         let succeeded = await task.value
@@ -382,8 +424,17 @@ final class UpdateChecker: ObservableObject {
         return await checkNow()
     }
 
-    private func performCheck() async -> Bool {
+    func checkLater() {
+        suppressAvailableRelease(as: .checkLater)
+    }
+
+    func skipAvailableVersion() {
+        suppressAvailableRelease(as: .skipVersion)
+    }
+
+    private func performCheck(trigger: UpdateCheckTrigger) async -> Bool {
         let includesPrereleases = Self.includesPrereleases(in: defaults)
+        let startingSuppressionGeneration = suppressionGeneration
         let releasesURL = includesPrereleases ? Self.allReleasesURL : Self.stableReleaseURL
         var urlRequest = URLRequest(url: releasesURL)
         urlRequest.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
@@ -405,9 +456,13 @@ final class UpdateChecker: ObservableObject {
                     return false
                 }
                 if let enrichedRelease {
-                    availableRelease = enrichedRelease
                     cache(enrichedRelease)
                 }
+                publishCachedRelease(
+                    after: trigger,
+                    includesPrereleases: includesPrereleases,
+                    startingSuppressionGeneration: startingSuppressionGeneration
+                )
                 markCheckSuccessful(includesPrereleases: includesPrereleases)
                 return true
             }
@@ -420,6 +475,7 @@ final class UpdateChecker: ObservableObject {
             if includesPrereleases {
                 let releases = try JSONDecoder().decode([GitHubRelease].self, from: response.data)
                 guard let newestRelease = Self.newestEligibleRelease(in: releases) else {
+                    cachedRelease = nil
                     availableRelease = nil
                     defaults.removeObject(forKey: Self.cachedReleaseKey)
                     if let etag = response.etag {
@@ -465,7 +521,11 @@ final class UpdateChecker: ObservableObject {
             } else {
                 defaults.removeObject(forKey: Self.etagKey)
             }
-            availableRelease = Self.isNewer(release.tagName, than: currentVersion) ? release : nil
+            publishCachedRelease(
+                after: trigger,
+                includesPrereleases: includesPrereleases,
+                startingSuppressionGeneration: startingSuppressionGeneration
+            )
             markCheckSuccessful(includesPrereleases: includesPrereleases)
             return true
         } catch {
@@ -476,7 +536,7 @@ final class UpdateChecker: ObservableObject {
     }
 
     private func changelogEnrichedCachedRelease() async -> AvailableRelease? {
-        guard let release = availableRelease,
+        guard let release = cachedRelease,
               release.changelog == nil,
               let changelog = await loadChangelog(for: release.tagName) else {
             return nil
@@ -511,7 +571,118 @@ final class UpdateChecker: ObservableObject {
         }
     }
 
+    var activeSuppression: UpdateSuppression? {
+        guard let suppressedUpdate,
+              suppressedUpdate.channel == Self.releaseChannelIdentifier(in: defaults),
+              Self.isNewer(suppressedUpdate.tagName, than: currentVersion) else {
+            return nil
+        }
+        return suppressedUpdate
+    }
+
+    private func suppressAvailableRelease(as disposition: UpdateSuppressionDisposition) {
+        guard let release = availableRelease else {
+            return
+        }
+        let suppression = UpdateSuppression(
+            tagName: release.tagName,
+            channel: Self.releaseChannelIdentifier(in: defaults),
+            disposition: disposition
+        )
+        suppressedUpdate = suppression
+        suppressionGeneration += 1
+        if let data = try? JSONEncoder().encode(suppression) {
+            defaults.set(data, forKey: Self.suppressedUpdateKey)
+        }
+        availableRelease = nil
+    }
+
+    private func clearSuppression() {
+        guard suppressedUpdate != nil
+                || defaults.object(forKey: Self.suppressedUpdateKey) != nil else {
+            return
+        }
+        suppressedUpdate = nil
+        suppressionGeneration += 1
+        defaults.removeObject(forKey: Self.suppressedUpdateKey)
+    }
+
+    private func restoreAvailableRelease(from release: AvailableRelease) {
+        let includesPrereleases = Self.includesPrereleases(in: defaults)
+        guard Self.isNewer(release.tagName, than: currentVersion),
+              Self.isEligible(release, includesPrereleases: includesPrereleases) else {
+            availableRelease = nil
+            return
+        }
+
+        guard let suppression = activeSuppression else {
+            availableRelease = release
+            return
+        }
+        if Self.isNewer(release.tagName, than: suppression.tagName) {
+            clearSuppression()
+            availableRelease = release
+        } else {
+            availableRelease = nil
+        }
+    }
+
+    private func publishCachedRelease(
+        after trigger: UpdateCheckTrigger,
+        includesPrereleases: Bool,
+        startingSuppressionGeneration: Int
+    ) {
+        guard let release = cachedRelease,
+              Self.isNewer(release.tagName, than: currentVersion),
+              Self.isEligible(release, includesPrereleases: includesPrereleases) else {
+            availableRelease = nil
+            if let suppression = suppressedUpdate,
+               Self.isNewer(suppression.tagName, than: currentVersion) == false {
+                clearSuppression()
+            }
+            return
+        }
+
+        guard let suppression = activeSuppression else {
+            availableRelease = release
+            return
+        }
+
+        if Self.isNewer(release.tagName, than: suppression.tagName) {
+            clearSuppression()
+            availableRelease = release
+            return
+        }
+
+        if suppressionGeneration != startingSuppressionGeneration {
+            availableRelease = nil
+            return
+        }
+
+        switch (trigger, suppression.disposition) {
+        case (.explicit, _), (.scheduled, .checkLater):
+            clearSuppression()
+            availableRelease = release
+        case (.scheduled, .skipVersion):
+            availableRelease = nil
+        }
+    }
+
+    private func revealCachedReleaseAfterExplicitCheck() {
+        guard let release = cachedRelease,
+              Self.isNewer(release.tagName, than: currentVersion),
+              Self.isEligible(
+                  release,
+                  includesPrereleases: Self.includesPrereleases(in: defaults)
+              ) else {
+            return
+        }
+        clearSuppression()
+        availableRelease = release
+    }
+
     private func cache(_ release: AvailableRelease) {
+        cachedRelease = release
         if let cachedData = try? JSONEncoder().encode(release) {
             defaults.set(cachedData, forKey: Self.cachedReleaseKey)
         }

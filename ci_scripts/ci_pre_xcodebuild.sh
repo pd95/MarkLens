@@ -5,6 +5,7 @@ SCRIPT_DIR="${0:A:h}"
 REPOSITORY_ROOT="${SCRIPT_DIR:h}"
 PROJECT_FILE="${PROJECT_FILE:-$REPOSITORY_ROOT/MarkLens.xcodeproj/project.pbxproj}"
 BUILD_INFO_FILE="${BUILD_INFO_FILE:-$REPOSITORY_ROOT/MarkLens/BuildInfo.swift}"
+CHANGELOG_FILE="${CHANGELOG_FILE:-$REPOSITORY_ROOT/CHANGELOG.md}"
 
 if [[ -z "${CI_TAG:-}" ]]; then
     echo "No CI_TAG set; leaving MARKETING_VERSION and CURRENT_PROJECT_VERSION unchanged."
@@ -25,6 +26,29 @@ if [[ ! "$TAG_VERSION" =~ '^[0-9]+(\.[0-9]+){1,2}(-[A-Za-z][A-Za-z0-9]*(\.[A-Za-
 fi
 
 VERSION="${TAG_VERSION%%-*}"
+
+if [[ ! -f "$CHANGELOG_FILE" ]]; then
+    echo "error: Expected changelog at $CHANGELOG_FILE"
+    exit 1
+fi
+
+if ! awk -v version="$VERSION" '
+    /^##[[:space:]]+/ {
+        heading = $0
+        sub(/^##[[:space:]]+/, "", heading)
+        sub(/[[:space:]]+$/, "", heading)
+        if (substr(heading, 1, 1) == "[" && substr(heading, length(heading), 1) == "]") {
+            heading = substr(heading, 2, length(heading) - 2)
+        }
+        if (heading == version) {
+            found = 1
+        }
+    }
+    END { exit found ? 0 : 1 }
+' "$CHANGELOG_FILE"; then
+    echo "error: CHANGELOG.md has no section for release $VERSION"
+    exit 1
+fi
 
 BUILD_NUMBER="${CI_BUILD_NUMBER:-}"
 if [[ -z "$BUILD_NUMBER" ]]; then

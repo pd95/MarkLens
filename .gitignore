@@ -13,3 +13,5 @@ tmp/
 
 inspiration/
 tests/
+!ci_scripts/tests/
+!ci_scripts/tests/test_ci_pre_xcodebuild.sh

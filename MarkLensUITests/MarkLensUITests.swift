@@ -46,6 +46,32 @@ final class MarkLensUITests: XCTestCase {
 
         preview.verifyUpdatePopover()
         capture(app, name: "update-release-notes-popover")
+        preview.checkUpdateLater()
+    }
+
+    @MainActor
+    func testInstalledReleaseNotesOpenAutomatically() throws {
+        let app = XCUIApplication()
+        app.launchEnvironment["MARKLENS_MOCK_INSTALLED_RELEASE_VERSION"] = "1.7.0"
+        app.launchEnvironment["MARKLENS_MOCK_PREVIOUS_INSTALLED_VERSION"] = "1.5.0"
+        app.launchEnvironment["MARKLENS_FORCE_WHATS_NEW"] = "1"
+        let preview = app.openDocument(named: "sample", fileExtension: "md")
+        defer { preview.terminate() }
+
+        preview.verifyInstalledReleaseNotes(includesPreviousRelease: true)
+        capture(app, name: "installed-release-notes-window")
+    }
+
+    @MainActor
+    func testInstalledReleaseNotesOpenFromHelpMenu() throws {
+        let app = XCUIApplication()
+        app.launchEnvironment["MARKLENS_MOCK_INSTALLED_RELEASE_VERSION"] = "1.7.0"
+        app.launchEnvironment["MARKLENS_MOCK_PREVIOUS_INSTALLED_VERSION"] = "1.7.0"
+        let preview = app.openDocument(named: "sample", fileExtension: "md")
+        defer { preview.terminate() }
+
+        preview.openInstalledReleaseNotesFromHelp()
+        preview.verifyInstalledReleaseNotes(includesPreviousRelease: false)
     }
 
     @MainActor
@@ -230,6 +256,10 @@ private struct MarkLensAppHandle {
         app.staticTexts["Search Fixture"].firstMatch
     }
 
+    var installedReleaseNotesWindow: XCUIElement {
+        app.windows["installed-release-notes"].firstMatch
+    }
+
     func verifyUpdatePopover() {
         let updateButton = app.buttons["updateAvailableButton"].firstMatch
         XCTAssertTrue(
@@ -249,6 +279,14 @@ private struct MarkLensAppHandle {
         )
         XCTAssertTrue(downloadButton.isHittable, "Expected the download action to remain on-screen.")
         XCTAssertTrue(
+            app.buttons["Check Later"].firstMatch.waitForExistence(timeout: 5),
+            "Expected the update reminder action."
+        )
+        XCTAssertTrue(
+            app.buttons["Skip This Version"].firstMatch.waitForExistence(timeout: 5),
+            "Expected the version skip action."
+        )
+        XCTAssertTrue(
             app.staticTexts["99.0.0"].firstMatch.waitForExistence(timeout: 5),
             "Expected the newest changelog section."
         )
@@ -256,6 +294,53 @@ private struct MarkLensAppHandle {
             app.staticTexts["98.0.0"].firstMatch.waitForExistence(timeout: 5),
             "Expected an earlier missed changelog section."
         )
+    }
+
+    func checkUpdateLater() {
+        app.buttons["Check Later"].firstMatch.click()
+        XCTAssertTrue(
+            app.buttons["updateAvailableButton"].firstMatch.waitForNonExistence(timeout: 5),
+            "Expected Check Later to remove the update badge."
+        )
+    }
+
+    func verifyInstalledReleaseNotes(includesPreviousRelease: Bool) {
+        let notesWindow = installedReleaseNotesWindow
+        XCTAssertTrue(
+            notesWindow.waitForExistence(timeout: 5),
+            "Expected the installed release-notes window."
+        )
+        XCTAssertTrue(
+            notesWindow.staticTexts["What’s New in MarkLens 1.7.0"].firstMatch
+                .waitForExistence(timeout: 5),
+            "Expected the installed release version."
+        )
+        XCTAssertTrue(
+            notesWindow.staticTexts["1.7.0"].firstMatch.waitForExistence(timeout: 5),
+            "Expected the current changelog section."
+        )
+        XCTAssertTrue(
+            notesWindow.buttons["Done"].firstMatch.waitForExistence(timeout: 5),
+            "Expected the Done action."
+        )
+        if includesPreviousRelease {
+            XCTAssertTrue(
+                notesWindow.staticTexts["Updated from MarkLens 1.5.0"].firstMatch.exists,
+                "Expected the previous installed version."
+            )
+            XCTAssertTrue(
+                notesWindow.staticTexts["1.6.0"].firstMatch.waitForExistence(timeout: 5),
+                "Expected an intervening changelog section."
+            )
+        }
+    }
+
+    func openInstalledReleaseNotesFromHelp() {
+        let helpMenu = app.menuBars.menuBarItems["Help"].firstMatch
+        helpMenu.click()
+        let menuItem = helpMenu.menus.menuItems["What’s New in MarkLens"].firstMatch
+        XCTAssertTrue(menuItem.waitForExistence(timeout: 5), "Expected the What’s New Help command.")
+        menuItem.click()
     }
 
     func openFind() {

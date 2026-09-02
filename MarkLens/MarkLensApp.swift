@@ -106,7 +106,6 @@ struct MarkLensApp: App {
             }
         }
         .defaultSize(width: 620, height: 620)
-        .windowStyle(.hiddenTitleBar)
         .defaultLaunchBehavior(.suppressed)
         .restorationBehavior(.disabled)
 

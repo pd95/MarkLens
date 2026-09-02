@@ -80,7 +80,14 @@ final class MarkLensUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchEnvironment["MARKLENS_MOCK_INSTALLED_RELEASE_VERSION"] = "1.7.0"
         app.launchEnvironment["MARKLENS_MOCK_PREVIOUS_INSTALLED_VERSION"] = "1.7.0"
-        let preview = app.openDocument(named: "sample", fileExtension: "md")
+        let preview = app.openDocument(
+            named: "sample",
+            fileExtension: "md",
+            additionalLaunchArguments: [
+                "-releaseNotes.currentRelease", "",
+                "-releaseNotes.previousRelease", "",
+            ]
+        )
         defer { preview.terminate() }
 
         preview.openInstalledReleaseNotesFromHelp()
@@ -383,10 +390,10 @@ private struct MarkLensAppHandle {
             notesWindow.waitForExistence(timeout: 5),
             "Expected the installed release-notes window."
         )
-        XCTAssertTrue(
-            notesWindow.staticTexts["What’s New in MarkLens 1.7.0"].firstMatch
-                .waitForExistence(timeout: 5),
-            "Expected the installed release version."
+        XCTAssertEqual(
+            notesWindow.title,
+            "What’s New in MarkLens",
+            "Expected the native release-notes window title."
         )
         XCTAssertTrue(
             notesWindow.staticTexts["1.7.0"].firstMatch.waitForExistence(timeout: 5),
@@ -405,6 +412,11 @@ private struct MarkLensAppHandle {
                 notesWindow.staticTexts["1.6.0"].firstMatch.waitForExistence(timeout: 5),
                 "Expected an intervening changelog section."
             )
+        } else {
+            XCTAssertTrue(
+                notesWindow.staticTexts["Changes in MarkLens 1.7.0"].firstMatch.exists,
+                "Expected the installed release context."
+            )
         }
     }
 
@@ -422,10 +434,10 @@ private struct MarkLensAppHandle {
             notesWindow.waitForExistence(timeout: 5),
             "Expected the complete development changelog window."
         )
-        XCTAssertTrue(
-            notesWindow.staticTexts["What’s New in MarkLens"].firstMatch
-                .waitForExistence(timeout: 5),
-            "Expected the development changelog title."
+        XCTAssertEqual(
+            notesWindow.title,
+            "What’s New in MarkLens",
+            "Expected the native development changelog window title."
         )
         XCTAssertTrue(
             notesWindow.staticTexts["Complete development changelog"].firstMatch.exists,

@@ -1,9 +1,11 @@
 # Changelog
 
-## 1.8.0 (Unreleased)
+## 1.8.0
 
-- Added persistent “Remind Me Later” and “Skip This Version” update choices, plus offline What’s New notes on first launch after installation or upgrade and full bundled changelog access from the Help menu.
+- Added a collapsible document-details card for YAML frontmatter, with structured rendering for common metadata, nested values, and readable light and dark appearances.
 - Expanded update notifications with a scrollable view of every release missed since the installed version and a direct download link for the release ZIP.
+- Added persistent “Remind Me Later” and “Skip This Version” choices so dismissed update notices return only when requested or when a newer release becomes available.
+- Added offline What’s New notes for the first launch after installation or upgrade, plus the complete bundled changelog from the Help menu.
 
 ## 1.7.0
 

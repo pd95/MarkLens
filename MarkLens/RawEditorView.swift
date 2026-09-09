@@ -117,6 +117,35 @@ private func focusEditor(_ textView: UITextView) {
 #endif
 
 #if os(macOS)
+@MainActor
+enum RawEditorTextConfiguration {
+    static func apply(to textView: NSTextView) {
+        textView.isAutomaticQuoteSubstitutionEnabled = false
+        textView.isAutomaticDashSubstitutionEnabled = false
+        textView.isAutomaticTextReplacementEnabled = false
+        textView.isAutomaticSpellingCorrectionEnabled = false
+        textView.isAutomaticTextCompletionEnabled = false
+        textView.isAutomaticLinkDetectionEnabled = false
+        textView.isAutomaticDataDetectionEnabled = false
+        textView.isContinuousSpellCheckingEnabled = false
+        textView.isGrammarCheckingEnabled = false
+    }
+}
+#else
+@MainActor
+enum RawEditorTextConfiguration {
+    static func apply(to textView: UITextView) {
+        textView.autocapitalizationType = .none
+        textView.autocorrectionType = .no
+        textView.smartDashesType = .no
+        textView.smartQuotesType = .no
+        textView.smartInsertDeleteType = .no
+        textView.spellCheckingType = .no
+    }
+}
+#endif
+
+#if os(macOS)
 private struct LargeDocumentTextEditor: NSViewRepresentable {
     @Binding var text: String
     @Binding var showFind: Bool
@@ -138,12 +167,7 @@ private struct LargeDocumentTextEditor: NSViewRepresentable {
             textView.importsGraphics = false
             textView.allowsUndo = true
             textView.usesFindBar = true
-            textView.isAutomaticQuoteSubstitutionEnabled = false
-            textView.isAutomaticDashSubstitutionEnabled = false
-            textView.isAutomaticTextReplacementEnabled = false
-            textView.isAutomaticSpellingCorrectionEnabled = false
-            textView.isContinuousSpellCheckingEnabled = false
-            textView.isGrammarCheckingEnabled = false
+            RawEditorTextConfiguration.apply(to: textView)
             textView.font = NSFont.monospacedSystemFont(
                 ofSize: NSFont.systemFontSize,
                 weight: .regular
@@ -341,12 +365,7 @@ private struct LargeDocumentTextEditor: UIViewRepresentable {
                 weight: .regular
             )
             textView.adjustsFontForContentSizeCategory = true
-            textView.autocapitalizationType = .none
-            textView.autocorrectionType = .no
-            textView.smartDashesType = .no
-            textView.smartQuotesType = .no
-            textView.smartInsertDeleteType = .no
-            textView.spellCheckingType = .no
+            RawEditorTextConfiguration.apply(to: textView)
             textView.alwaysBounceVertical = true
             textView.keyboardDismissMode = .interactive
             textView.layoutManager.allowsNonContiguousLayout = true
@@ -550,6 +569,7 @@ private struct RawEditorScrollBridge: NSViewRepresentable {
             if textView == nil {
                 textView = enclosingTextView(from: marker)
                 if let textView {
+                    RawEditorTextConfiguration.apply(to: textView)
                     RawEditorPerformanceInstrumentation.event(
                         "RawEditorConnected",
                         value: textView.string.utf8.count
@@ -779,6 +799,7 @@ private struct RawEditorScrollBridge: UIViewRepresentable {
             if textView == nil {
                 textView = enclosingTextView(from: marker)
                 if let textView {
+                    RawEditorTextConfiguration.apply(to: textView)
                     rebuildLineIndex(for: textView.text)
                 }
                 offsetObservation = textView?.observe(\.contentOffset, options: [.new]) { [weak self] _, _ in

@@ -555,6 +555,12 @@ private struct MarkLensAppHandle {
             (sourceEditor.value as? String)?.contains(focusMarker) == true,
             "Expected source editing to begin with keyboard focus in the editor."
         )
+        let literalMarkdown = "'literal-quotes' -- literal-dashes"
+        app.typeText(literalMarkdown)
+        XCTAssertTrue(
+            (sourceEditor.value as? String)?.contains(literalMarkdown) == true,
+            "Expected source editing to preserve literal Markdown punctuation."
+        )
     }
 
     func verifyExternalRefreshPreservesPreviewPosition() throws {

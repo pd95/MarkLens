@@ -6,74 +6,91 @@ import XCTest
 
 @MainActor
 final class ExternalFileMonitorTests: XCTestCase {
-    func testDetectsAtomicFileReplacement() throws {
-        let directoryURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent(UUID().uuidString, isDirectory: true)
-        try FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: directoryURL) }
-
-        let fileURL = directoryURL.appendingPathComponent("document.md")
-        try Data("# Before".utf8).write(to: fileURL)
-
-        let changed = expectation(description: "external file change")
-        let monitor = makeMonitor(fileURL: fileURL, initialText: "# Before") { text in
-            XCTAssertEqual(text, "# After")
-            changed.fulfill()
-        }
-
-        try Data("# After".utf8).write(to: fileURL, options: .atomic)
-        wait(for: [changed], timeout: 3)
-        monitor.stop()
-        withExtendedLifetime(monitor) {}
-    }
-
-    func testDetectsSuccessiveAtomicReplacements() throws {
-        let fixture = try MonitorFixture(initialText: "One")
-        defer { fixture.remove() }
-
-        let changed = expectation(description: "successive changes")
-        changed.expectedFulfillmentCount = 2
-        var received: [String] = []
-        let monitor = makeMonitor(fileURL: fixture.fileURL, initialText: "One") { text in
-            received.append(text)
-            changed.fulfill()
-        }
-
-        try Data("Two".utf8).write(to: fixture.fileURL, options: .atomic)
-        XCTAssertTrue(waitUntil { received == ["Two"] })
-        try Data("Three".utf8).write(to: fixture.fileURL, options: .atomic)
-
-        wait(for: [changed], timeout: 3)
-        XCTAssertEqual(received, ["Two", "Three"])
-        monitor.stop()
-    }
-
-    func testDetectsFileRecreatedAfterDeletion() throws {
+    func testSignalsAtomicFileReplacement() throws {
         let fixture = try MonitorFixture(initialText: "Before")
         defer { fixture.remove() }
 
-        let changed = expectation(description: "recreated file")
-        let monitor = makeMonitor(fileURL: fixture.fileURL, initialText: "Before") { text in
-            XCTAssertEqual(text, "After")
+        let changed = expectation(description: "file change signal")
+        let monitor = makeMonitor(fileURL: fixture.fileURL) {
+            changed.fulfill()
+        }
+
+        try Data("After".utf8).write(to: fixture.fileURL, options: .atomic)
+
+        wait(for: [changed], timeout: 2)
+        monitor.stop()
+    }
+
+    func testSignalsContentReplacementThatPreservesModificationDate() throws {
+        let fixture = try MonitorFixture(initialText: "Before")
+        defer { fixture.remove() }
+        let originalAttributes = try FileManager.default.attributesOfItem(
+            atPath: fixture.fileURL.path
+        )
+
+        let changed = expectation(description: "timestamp-preserving change signal")
+        let monitor = makeMonitor(fileURL: fixture.fileURL) {
+            changed.fulfill()
+        }
+
+        try Data("After".utf8).write(to: fixture.fileURL)
+        if let modificationDate = originalAttributes[.modificationDate] {
+            try FileManager.default.setAttributes(
+                [.modificationDate: modificationDate],
+                ofItemAtPath: fixture.fileURL.path
+            )
+        }
+
+        wait(for: [changed], timeout: 2)
+        monitor.stop()
+    }
+
+    func testCoalescesSuccessiveFileEvents() throws {
+        let fixture = try MonitorFixture(initialText: "Before")
+        defer { fixture.remove() }
+
+        let changed = expectation(description: "coalesced file change signal")
+        var signalCount = 0
+        let monitor = makeMonitor(fileURL: fixture.fileURL) {
+            signalCount += 1
+            changed.fulfill()
+        }
+
+        try Data("One".utf8).write(to: fixture.fileURL, options: .atomic)
+        try Data("Two".utf8).write(to: fixture.fileURL, options: .atomic)
+        try Data("Three".utf8).write(to: fixture.fileURL, options: .atomic)
+
+        wait(for: [changed], timeout: 2)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.25))
+        XCTAssertEqual(signalCount, 1)
+        monitor.stop()
+    }
+
+    func testSignalsWhenDeletedFileReappears() throws {
+        let fixture = try MonitorFixture(initialText: "Before")
+        defer { fixture.remove() }
+
+        let changed = expectation(description: "recreated file signal")
+        let monitor = makeMonitor(fileURL: fixture.fileURL) {
             changed.fulfill()
         }
 
         try FileManager.default.removeItem(at: fixture.fileURL)
-        DispatchQueue.global().asyncAfter(deadline: .now() + .milliseconds(300)) {
+        DispatchQueue.global().asyncAfter(deadline: .now() + .milliseconds(150)) {
             try? Data("After".utf8).write(to: fixture.fileURL)
         }
 
-        wait(for: [changed], timeout: 3)
+        wait(for: [changed], timeout: 2)
         monitor.stop()
     }
 
-    func testStopSuppressesQueuedDelivery() throws {
+    func testStopSuppressesQueuedSignal() throws {
         let fixture = try MonitorFixture(initialText: "Before")
         defer { fixture.remove() }
 
-        let changed = expectation(description: "stale change")
+        let changed = expectation(description: "stale file change signal")
         changed.isInverted = true
-        let monitor = makeMonitor(fileURL: fixture.fileURL, initialText: "Before") { _ in
+        let monitor = makeMonitor(fileURL: fixture.fileURL) {
             changed.fulfill()
         }
 
@@ -83,248 +100,223 @@ final class ExternalFileMonitorTests: XCTestCase {
         wait(for: [changed], timeout: 0.5)
     }
 
-    func testReplacingFileDoesNotReportItsOwnWrite() async throws {
-        let fixture = try MonitorFixture(initialText: "Before")
-        defer { fixture.remove() }
-
-        let changed = expectation(description: "stale external change")
-        changed.isInverted = true
-        let monitor = makeMonitor(fileURL: fixture.fileURL, initialText: "Before") { _ in
-            changed.fulfill()
-        }
-
-        try await monitor.replaceFile(with: "Draft")
-
-        await fulfillment(of: [changed], timeout: 0.5)
-        XCTAssertEqual(try String(contentsOf: fixture.fileURL, encoding: .utf8), "Draft")
-        monitor.stop()
-    }
-
-    func testReplacingFileRejectsAChangedBaseline() async throws {
-        let fixture = try MonitorFixture(initialText: "Before")
-        defer { fixture.remove() }
-        let monitor = makeMonitor(fileURL: fixture.fileURL, initialText: "Before") { _ in }
-
-        try Data("External".utf8).write(to: fixture.fileURL, options: .atomic)
-
-        do {
-            try await monitor.replaceFile(with: "Draft")
-            XCTFail("Expected the changed file to prevent replacement")
-        } catch ExternalFileMonitor.ReplacementError.fileChanged(let text) {
-            XCTAssertEqual(text, "External")
-        }
-        XCTAssertEqual(try String(contentsOf: fixture.fileURL, encoding: .utf8), "External")
-        monitor.stop()
-    }
-
-    func testStartsMonitoringWhenInitiallyMissingFileAppears() throws {
-        let directoryURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent(UUID().uuidString, isDirectory: true)
-        try FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: directoryURL) }
-        let fileURL = directoryURL.appendingPathComponent("document.md")
-
-        let changed = expectation(description: "created file")
-        let monitor = makeMonitor(fileURL: fileURL, initialText: "Before") { text in
-            XCTAssertEqual(text, "After")
-            changed.fulfill()
-        }
-        DispatchQueue.global().asyncAfter(deadline: .now() + .milliseconds(300)) {
-            try? Data("After".utf8).write(to: fileURL)
-        }
-
-        wait(for: [changed], timeout: 3)
-        monitor.stop()
-    }
-
-    func testRecreatedFileStartsANewRewriteWindow() throws {
-        let fixture = try MonitorFixture(initialText: "Before")
-        defer { fixture.remove() }
-
-        let timing = ExternalFileMonitor.ReloadTiming(
-            appendDelay: .milliseconds(50),
-            rewriteQuietPeriod: .milliseconds(180),
-            maximumRewriteDelay: .milliseconds(220),
-            stabilityInterval: .milliseconds(10),
-            reconnectDelay: .milliseconds(30)
-        )
-        var received: [String] = []
-        let monitor = ExternalFileMonitor(
-            fileURL: fixture.fileURL,
-            initialText: "Before",
-            timing: timing
-        ) { text in
-            received.append(text)
-        }
-
-        try FileManager.default.removeItem(at: fixture.fileURL)
-        RunLoop.current.run(until: Date().addingTimeInterval(0.3))
-        try Data("After".utf8).write(to: fixture.fileURL)
-
-        RunLoop.current.run(until: Date().addingTimeInterval(0.1))
-        XCTAssertTrue(received.isEmpty)
-        XCTAssertTrue(waitUntil(timeout: 1) { received == ["After"] })
-        monitor.stop()
-    }
-
-    func testFrequentAppendsAreCoalesced() throws {
-        let fixture = try MonitorFixture(initialText: "Start\n")
-        defer { fixture.remove() }
-
-        let changed = expectation(description: "coalesced append")
-        var received: [String] = []
-        let monitor = makeMonitor(fileURL: fixture.fileURL, initialText: "Start\n") { text in
-            received.append(text)
-            changed.fulfill()
-        }
-
-        try Data("Start\nOne\n".utf8).write(to: fixture.fileURL, options: .atomic)
-        try Data("Start\nOne\nTwo\n".utf8).write(to: fixture.fileURL, options: .atomic)
-        try Data("Start\nOne\nTwo\nThree\n".utf8).write(to: fixture.fileURL, options: .atomic)
-
-        wait(for: [changed], timeout: 1)
-        XCTAssertEqual(received, ["Start\nOne\nTwo\nThree\n"])
-        monitor.stop()
-    }
-
-    func testInPlaceAppendsRefreshAcrossMultipleWindows() throws {
-        let fixture = try MonitorFixture(initialText: "Start\n")
-        defer { fixture.remove() }
-
-        let changed = expectation(description: "periodic append refreshes")
-        changed.expectedFulfillmentCount = 2
-        var received: [String] = []
-        let monitor = makeMonitor(fileURL: fixture.fileURL, initialText: "Start\n") { text in
-            received.append(text)
-            changed.fulfill()
-            if received.count == 1 {
-                try? self.append("Two\n", to: fixture.fileURL)
-            }
-        }
-
-        try append("One\n", to: fixture.fileURL)
-
-        wait(for: [changed], timeout: 1)
-        XCTAssertEqual(received, ["Start\nOne\n", "Start\nOne\nTwo\n"])
-        monitor.stop()
-    }
-
-    func testLargerChangedPrefixUsesRewriteQuietPeriod() throws {
-        let fixture = try MonitorFixture(initialText: "Original")
-        defer { fixture.remove() }
-
-        let changed = expectation(description: "completed rewrite")
-        let startedAt = Date()
-        var received: [String] = []
-        let monitor = makeMonitor(fileURL: fixture.fileURL, initialText: "Original") { text in
-            received.append(text)
-            changed.fulfill()
-        }
-
-        try Data("Intermediate content longer than before".utf8)
-            .write(to: fixture.fileURL, options: .atomic)
-        DispatchQueue.global().asyncAfter(deadline: .now() + .milliseconds(100)) {
-            try? Data("Final rewritten content longer than before".utf8)
-                .write(to: fixture.fileURL, options: .atomic)
-        }
-
-        wait(for: [changed], timeout: 1)
-        XCTAssertEqual(received, ["Final rewritten content longer than before"])
-        XCTAssertGreaterThanOrEqual(Date().timeIntervalSince(startedAt), 0.22)
-        monitor.stop()
-    }
-
-    func testContinuousRewriteUsesMaximumDelay() throws {
-        let fixture = try MonitorFixture(initialText: "Original")
-        defer { fixture.remove() }
-
-        let timing = ExternalFileMonitor.ReloadTiming(
-            appendDelay: .milliseconds(50),
-            rewriteQuietPeriod: .milliseconds(250),
-            maximumRewriteDelay: .milliseconds(350),
-            stabilityInterval: .milliseconds(10),
-            reconnectDelay: .milliseconds(50)
-        )
-        let changed = expectation(description: "bounded rewrite")
-        let startedAt = Date()
-        var received: [String] = []
-        let monitor = ExternalFileMonitor(
-            fileURL: fixture.fileURL,
-            initialText: "Original",
-            timing: timing
-        ) { text in
-            received.append(text)
-            changed.fulfill()
-        }
-
-        try Data("Rewrite zero".utf8).write(to: fixture.fileURL, options: .atomic)
-        for (delay, version) in [(100, 1), (200, 2), (300, 3)] {
-            DispatchQueue.global().asyncAfter(deadline: .now() + .milliseconds(delay)) {
-                try? Data("Rewrite \(version)".utf8).write(to: fixture.fileURL, options: .atomic)
-            }
-        }
-
-        wait(for: [changed], timeout: 1)
-        XCTAssertEqual(received, ["Rewrite 3"])
-        XCTAssertGreaterThanOrEqual(Date().timeIntervalSince(startedAt), 0.3)
-        XCTAssertLessThan(Date().timeIntervalSince(startedAt), 0.7)
-        monitor.stop()
-    }
-
-    func testInvalidUTF8DoesNotReplaceAppendBaseline() throws {
-        let fixture = try MonitorFixture(initialText: "Start")
-        defer { fixture.remove() }
-
-        var received: [String] = []
-        let monitor = makeMonitor(fileURL: fixture.fileURL, initialText: "Start") { text in
-            received.append(text)
-        }
-
-        try Data(Array("Start".utf8) + [0xC3]).write(to: fixture.fileURL, options: .atomic)
-        RunLoop.current.run(until: Date().addingTimeInterval(0.15))
-        try Data("Start".utf8).write(to: fixture.fileURL, options: .atomic)
-        RunLoop.current.run(until: Date().addingTimeInterval(0.3))
-        XCTAssertTrue(received.isEmpty)
-
-        try Data(Array("Start".utf8) + [0xC3, 0xA9])
-            .write(to: fixture.fileURL, options: .atomic)
-        XCTAssertTrue(waitUntil(timeout: 1) { received == ["Starté"] })
-        monitor.stop()
-    }
-
-    private func append(_ text: String, to fileURL: URL) throws {
-        let handle = try FileHandle(forWritingTo: fileURL)
-        defer { try? handle.close() }
-        try handle.seekToEnd()
-        try handle.write(contentsOf: Data(text.utf8))
-    }
-
     private func makeMonitor(
         fileURL: URL,
-        initialText: String,
         changeHandler: @escaping ExternalFileMonitor.ChangeHandler
     ) -> ExternalFileMonitor {
         ExternalFileMonitor(
             fileURL: fileURL,
-            initialText: initialText,
-            timing: ExternalFileMonitor.ReloadTiming(
-                appendDelay: .milliseconds(100),
-                rewriteQuietPeriod: .milliseconds(160),
-                maximumRewriteDelay: .milliseconds(450),
-                stabilityInterval: .milliseconds(10),
+            timing: ExternalFileMonitor.Timing(
+                quietPeriod: .milliseconds(100),
+                maximumDelay: .milliseconds(350),
                 reconnectDelay: .milliseconds(50)
             ),
             changeHandler: changeHandler
         )
     }
+}
 
-    private func waitUntil(
-        timeout: TimeInterval = 3,
-        condition: @escaping () -> Bool
-    ) -> Bool {
-        let deadline = Date().addingTimeInterval(timeout)
-        while condition() == false && RunLoop.current.run(mode: .default, before: deadline) && Date() < deadline {}
-        return condition()
+@MainActor
+final class ExternalDocumentReloadCoordinatorTests: XCTestCase {
+    func testReloadsEverySignalForCleanDocument() {
+        let document = ManagedDocumentStub()
+        let coordinator = makeCoordinator(document: document)
+
+        let result = coordinator.handleChange(isEditing: false)
+
+        assertReloaded(result)
+        XCTAssertEqual(document.reloadCount, 1)
+    }
+
+    func testReloadsSignalEvenWhenExternalReplacementPreservesModificationDate() {
+        let document = ManagedDocumentStub()
+        let coordinator = makeCoordinator(document: document)
+
+        let result = coordinator.handleChange(isEditing: false)
+
+        assertReloaded(result)
+        XCTAssertEqual(document.reloadCount, 1)
+    }
+
+    func testRetriesChangeAfterDocumentBecomesAvailable() {
+        let document = ManagedDocumentStub()
+        var resolvedDocument: ManagedDocumentStub?
+        let coordinator = ExternalDocumentReloadCoordinator(
+            fileURL: URL(fileURLWithPath: "/tmp/document.md"),
+            resolver: { _ in resolvedDocument }
+        )
+
+        guard case .unavailable = coordinator.handleChange(isEditing: false) else {
+            return XCTFail("Expected the unresolved document to be unavailable.")
+        }
+        XCTAssertTrue(coordinator.hasDeferredChange)
+
+        resolvedDocument = document
+        let result = coordinator.resumeDeferredChange(isEditing: false)
+
+        guard let result else {
+            return XCTFail("Expected the unavailable change to remain pending.")
+        }
+        assertReloaded(result)
+        XCTAssertFalse(coordinator.hasDeferredChange)
+    }
+
+    func testDefersReloadWhileEditing() {
+        let document = ManagedDocumentStub()
+        let coordinator = makeCoordinator(document: document)
+
+        let result = coordinator.handleChange(isEditing: true)
+
+        assertDeferred(result)
+        XCTAssertTrue(coordinator.hasDeferredChange)
+        XCTAssertEqual(document.reloadCount, 0)
+    }
+
+    func testDefersReloadWhileDocumentHasLocalChanges() {
+        let document = ManagedDocumentStub()
+        document.hasLocalChanges = true
+        let coordinator = makeCoordinator(document: document)
+
+        let result = coordinator.handleChange(isEditing: false)
+
+        assertDeferred(result)
+        XCTAssertEqual(document.reloadCount, 0)
+    }
+
+    func testResumesDeferredReloadAfterDocumentBecomesClean() {
+        let document = ManagedDocumentStub()
+        document.hasLocalChanges = true
+        let coordinator = makeCoordinator(document: document)
+        _ = coordinator.handleChange(isEditing: false)
+        document.hasLocalChanges = false
+
+        let result = coordinator.resumeDeferredChange(isEditing: false)
+
+        guard let result else {
+            return XCTFail("Expected a deferred change to be reconsidered.")
+        }
+        assertReloaded(result)
+        XCTAssertFalse(coordinator.hasDeferredChange)
+        XCTAssertEqual(document.reloadCount, 1)
+    }
+
+    func testReportsReloadFailureWithoutClearingDeferredState() {
+        let document = ManagedDocumentStub()
+        document.reloadError = CocoaError(.fileReadUnknown)
+        let coordinator = makeCoordinator(document: document)
+
+        let result = coordinator.handleChange(isEditing: false)
+
+        guard case .failed = result else {
+            return XCTFail("Expected the reload error to be reported.")
+        }
+        XCTAssertTrue(coordinator.hasDeferredChange)
+        XCTAssertEqual(document.reloadCount, 1)
+    }
+
+    func testRetrySucceedsAfterTransientReloadFailure() {
+        let document = ManagedDocumentStub()
+        document.reloadError = CocoaError(.fileReadUnknown)
+        let coordinator = makeCoordinator(document: document)
+        _ = coordinator.handleChange(isEditing: false)
+        document.reloadError = nil
+
+        let result = coordinator.resumeDeferredChange(isEditing: false)
+
+        guard let result else {
+            return XCTFail("Expected the failed reload to remain pending.")
+        }
+        assertReloaded(result)
+        XCTAssertFalse(coordinator.hasDeferredChange)
+        XCTAssertEqual(document.reloadCount, 2)
+    }
+
+    func testUpdateKeepsAutosavedDraftUntilLocalSaveCompletes() throws {
+        let sourceDocument = MarkdownDocument(text: "# Baseline")
+        sourceDocument.beginSourceEditing()
+        sourceDocument.updateSourceDraft("# Draft")
+        let managedDocument = ManagedDocumentStub()
+        let coordinator = makeCoordinator(document: managedDocument)
+        _ = coordinator.handleChange(isEditing: true)
+
+        XCTAssertTrue(sourceDocument.commitSourceEditing())
+        coordinator.preserveLocalVersionForSaving()
+
+        assertDeferred(try XCTUnwrap(coordinator.resumeDeferredChange(isEditing: false)))
+        XCTAssertEqual(try sourceDocument.snapshot(contentType: .appMarkdown), "# Draft")
+        XCTAssertEqual(managedDocument.reloadCount, 0)
+
+        managedDocument.hasLocalChanges = false
+        assertReloaded(try XCTUnwrap(coordinator.resumeDeferredChange(isEditing: false)))
+        XCTAssertEqual(managedDocument.reloadCount, 1)
+    }
+
+    func testCancelKeepsRestoredBaselineUntilLocalSaveCompletes() throws {
+        let sourceDocument = MarkdownDocument(text: "# Baseline")
+        sourceDocument.beginSourceEditing()
+        sourceDocument.updateSourceDraft("# Draft")
+        let managedDocument = ManagedDocumentStub()
+        let coordinator = makeCoordinator(document: managedDocument)
+        _ = coordinator.handleChange(isEditing: true)
+
+        XCTAssertTrue(sourceDocument.cancelSourceEditing())
+        coordinator.preserveLocalVersionForSaving()
+
+        assertDeferred(try XCTUnwrap(coordinator.resumeDeferredChange(isEditing: false)))
+        XCTAssertEqual(try sourceDocument.snapshot(contentType: .appMarkdown), "# Baseline")
+        XCTAssertEqual(managedDocument.reloadCount, 0)
+
+        managedDocument.hasLocalChanges = false
+        assertReloaded(try XCTUnwrap(coordinator.resumeDeferredChange(isEditing: false)))
+        XCTAssertEqual(managedDocument.reloadCount, 1)
+    }
+
+    private func makeCoordinator(document: ManagedDocumentStub) -> ExternalDocumentReloadCoordinator {
+        ExternalDocumentReloadCoordinator(
+            fileURL: URL(fileURLWithPath: "/tmp/document.md"),
+            resolver: { _ in document }
+        )
+    }
+
+    private func assertReloaded(
+        _ result: ExternalDocumentReloadCoordinator.Result,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        guard case .reloaded = result else {
+            return XCTFail("Expected a reload result.", file: file, line: line)
+        }
+    }
+
+    private func assertDeferred(
+        _ result: ExternalDocumentReloadCoordinator.Result,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        guard case .deferred = result else {
+            return XCTFail("Expected a deferred result.", file: file, line: line)
+        }
+    }
+
+}
+
+@MainActor
+private final class ManagedDocumentStub: ManagedDocumentReloading {
+    var hasLocalChanges = false
+    var reloadError: Error?
+    private(set) var markLocalVersionCount = 0
+    private(set) var reloadCount = 0
+
+    func markLocalVersionForSaving() {
+        markLocalVersionCount += 1
+        hasLocalChanges = true
+    }
+
+    func reloadFromDisk() throws {
+        reloadCount += 1
+        if let reloadError {
+            throw reloadError
+        }
     }
 }
 

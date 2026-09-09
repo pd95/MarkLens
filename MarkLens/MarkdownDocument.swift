@@ -16,7 +16,7 @@ import os
 final class MarkdownDocument: ReferenceFileDocument {
     typealias Snapshot = String
 
-    private(set) var text: String
+    @Published private(set) var text: String
     @Published private(set) var renderedHTML: String
     @Published private(set) var renderedResources: [HTMLResource]
     @Published private(set) var containsWikiLinks: Bool
@@ -26,6 +26,7 @@ final class MarkdownDocument: ReferenceFileDocument {
     @Published private(set) var renderRevision: Int
     let filename: String?
     private var renderingPreferences: RenderingPreferences
+    private var sourceEditingBaseline: String?
 
     private static let renderingPipeline = MarkdownPipeline(
         plugins: [.wikiLinks(), .syntaxHighlighting(), .math(), .mermaid(), .customCSS()]
@@ -116,6 +117,42 @@ final class MarkdownDocument: ReferenceFileDocument {
         }
 
         text = newText
+        renderCurrentText()
+    }
+
+    func beginSourceEditing() {
+        guard sourceEditingBaseline == nil else { return }
+        sourceEditingBaseline = text
+    }
+
+    func updateSourceDraft(_ newText: String) {
+        guard sourceEditingBaseline != nil, text != newText else { return }
+        text = newText
+    }
+
+    @discardableResult
+    func commitSourceEditing() -> Bool {
+        guard let sourceEditingBaseline else { return false }
+        self.sourceEditingBaseline = nil
+        let changed = text != sourceEditingBaseline
+        if changed {
+            renderCurrentText()
+        }
+        return changed
+    }
+
+    @discardableResult
+    func cancelSourceEditing() -> Bool {
+        guard let sourceEditingBaseline else { return false }
+        self.sourceEditingBaseline = nil
+        guard text != sourceEditingBaseline else { return false }
+        text = sourceEditingBaseline
+        renderCurrentText()
+        return true
+    }
+
+    private func renderCurrentText() {
+        let newText = text
         let rendering = Self.renderHTML(from: newText, title: filename, preferences: renderingPreferences)
         renderedHTML = rendering.html
         renderedResources = rendering.resources

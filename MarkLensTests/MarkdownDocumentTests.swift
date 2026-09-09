@@ -36,4 +36,42 @@ final class MarkdownDocumentTests: XCTestCase {
         document.updateText("# Safe Markdown")
         XCTAssertEqual(document.filteredHTMLFragmentCount, 0)
     }
+
+    func testSnapshotIncludesInProgressSourceDraftWithoutRenderingIt() throws {
+        let document = MarkdownDocument(text: "# Before")
+        let originalHTML = document.renderedHTML
+
+        document.beginSourceEditing()
+        document.updateSourceDraft("# Draft")
+
+        XCTAssertEqual(document.text, "# Draft")
+        XCTAssertEqual(try document.snapshot(contentType: .appMarkdown), "# Draft")
+        XCTAssertEqual(document.renderedHTML, originalHTML)
+        XCTAssertEqual(document.renderRevision, 0)
+    }
+
+    func testCommittingSourceEditingRendersTheDraft() {
+        let document = MarkdownDocument(text: "# Before")
+
+        document.beginSourceEditing()
+        document.updateSourceDraft("# After")
+        document.commitSourceEditing()
+
+        XCTAssertEqual(document.text, "# After")
+        XCTAssertTrue(document.renderedHTML.contains("After"))
+        XCTAssertEqual(document.renderRevision, 1)
+    }
+
+    func testCancellingSourceEditingRestoresAutosavableBaseline() throws {
+        let document = MarkdownDocument(text: "# Before")
+
+        document.beginSourceEditing()
+        document.updateSourceDraft("# Autosaved draft")
+        XCTAssertEqual(try document.snapshot(contentType: .appMarkdown), "# Autosaved draft")
+        document.cancelSourceEditing()
+
+        XCTAssertEqual(document.text, "# Before")
+        XCTAssertEqual(try document.snapshot(contentType: .appMarkdown), "# Before")
+        XCTAssertTrue(document.renderedHTML.contains("Before"))
+    }
 }

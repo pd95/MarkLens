@@ -54,6 +54,10 @@ struct ContentView: View {
 #if os(macOS)
     @State private var pendingLocalAccessRequest: LocalAccessRequest?
     @State private var externalFileMonitor: ExternalFileMonitor?
+    @State private var externalDocumentReloadCoordinator: ExternalDocumentReloadCoordinator?
+    @State private var externalReloadRetryTask: Task<Void, Never>?
+    @State private var externalReloadRetryAttempt = 0
+    @State private var externalReloadErrorDescription: String?
     @State private var isUpdatePopoverPresented = false
     @State private var failedLocalImageURLs: Set<URL> = []
     @State private var wikiLinkMatches: [URL] = []
@@ -62,11 +66,6 @@ struct ContentView: View {
     @State private var isResolvingWikiLink = false
     @State private var wikiResolutionWork: Task<WikiLinkResolution, Never>?
 #endif
-    @State private var pendingExternalText: String?
-    @State private var isExternalChangeDetailsPresented = false
-    @State private var isExternalConflictPresented = false
-    @State private var isResolvingExternalChange = false
-    @State private var externalResolutionGeneration = 0
     @State private var localDocumentError: String?
     @State private var outputRequest: RenderedDocumentOutputRequest?
     @State private var activeOutputOperationID: UUID?
@@ -75,7 +74,6 @@ struct ContentView: View {
     @State private var isHTMLFilteringInfoPresented = false
     @State private var isRawEditing = false
     @State private var showFind = false
-    @State private var rawDraft = ""
     @State private var previewFindText = ""
     @State private var isPreviewFindPresented = false
     @State private var previewFindRequest = 0
@@ -151,14 +149,13 @@ struct ContentView: View {
 
             if isRawEditing {
                 RawEditorView(
-                    text: $rawDraft,
+                    text: sourceTextBinding,
                     showFind: $showFind,
                     scrollPosition: $sourceScrollPosition,
                     scrollTarget: sourceScrollTarget,
                     scrollRequest: sourceScrollRequest,
                     selectionLine: sourceSelectionLine
                 )
-                    .disabled(isResolvingExternalChange)
                     .transition(.move(edge: .trailing))
                     .zIndex(1)
             }
@@ -196,7 +193,6 @@ struct ContentView: View {
                         requestFinishRawEditing(commitChanges: false)
                     }
                     .keyboardShortcut(.cancelAction)
-                    .disabled(isResolvingExternalChange)
                 }
 
 #if os(macOS)
@@ -218,44 +214,11 @@ struct ContentView: View {
                 }
 #endif
 
-#if os(macOS)
-                if pendingExternalText != nil {
-                    ToolbarItem(placement: .primaryAction) {
-                        Button {
-                            isExternalChangeDetailsPresented = true
-                        } label: {
-                            Label("Changed Externally", systemImage: "exclamationmark.triangle.fill")
-                                .foregroundStyle(.orange)
-                        }
-                        .help("This file changed outside MarkLens while you were editing.")
-                        .accessibilityIdentifier("externalChangeIndicator")
-                        .popover(isPresented: $isExternalChangeDetailsPresented, arrowEdge: .top) {
-                            VStack(alignment: .leading, spacing: 10) {
-                                Label {
-                                    Text("File Changed Externally")
-                                        .foregroundStyle(.primary)
-                                } icon: {
-                                    Image(systemName: "exclamationmark.triangle.fill")
-                                        .foregroundStyle(.orange)
-                                }
-                                .font(.headline)
-
-                                Text("Your draft is safe. Choose Cancel or Update when you’re ready, and MarkLens will ask which version to keep.")
-                                    .fixedSize(horizontal: false, vertical: true)
-                            }
-                            .frame(width: 280)
-                            .padding()
-                        }
-                    }
-                }
-#endif
-
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Update", systemImage: "checkmark") {
                         requestFinishRawEditing(commitChanges: true)
                     }
                     .keyboardShortcut("s")
-                    .disabled(isResolvingExternalChange)
                 }
             } else {
                 if displayedFilteredHTMLFragmentCount > 0 {
@@ -475,16 +438,16 @@ struct ContentView: View {
         .onChange(of: fileURL) {
             externalFileMonitor?.stop()
             externalFileMonitor = nil
-            pendingExternalText = nil
-            externalResolutionGeneration += 1
-            isResolvingExternalChange = false
+            externalDocumentReloadCoordinator = nil
+            cancelExternalReloadRetry()
+            externalReloadErrorDescription = nil
             startExternalFileMonitor()
         }
         .onChange(of: scenePhase) {
             guard scenePhase == .active else {
                 return
             }
-            externalFileMonitor?.refresh()
+            resumeDeferredExternalChange()
             Task {
                 await updateChecker.checkIfDue()
             }
@@ -494,8 +457,9 @@ struct ContentView: View {
 #if os(macOS)
             externalFileMonitor?.stop()
             externalFileMonitor = nil
-            externalResolutionGeneration += 1
-            isResolvingExternalChange = false
+            externalDocumentReloadCoordinator = nil
+            cancelExternalReloadRetry()
+            externalReloadErrorDescription = nil
             cancelWikiResolution()
 #endif
             wikiNavigation.cancelPendingNavigation()
@@ -530,17 +494,18 @@ struct ContentView: View {
         } message: {
             Text(outputErrorDescription ?? "The rendered document could not be produced.")
         }
-        .alert("File Changed Externally", isPresented: $isExternalConflictPresented) {
-            Button("Keep My Draft", role: .destructive) {
-                keepRawDraft()
+#if os(macOS)
+        .alert("Unable to Reload File", isPresented: externalReloadErrorAlertPresented) {
+            Button("Reload Again") {
+                retryExternalReload()
             }
-            Button("Use External Version", role: .destructive) {
-                useExternalVersion()
+            Button("OK", role: .cancel) {
+                externalReloadErrorDescription = nil
             }
-            Button("Continue Editing", role: .cancel) {}
         } message: {
-            Text("Choose which version to keep. Keeping your draft will replace the file on disk. Using the external version will discard your draft.")
+            Text(externalReloadErrorDescription ?? "The file could not be reloaded.")
         }
+#endif
         .alert(htmlFilteringAlertTitle, isPresented: $isHTMLFilteringInfoPresented) {
             Button("OK", role: .cancel) {}
         } message: {
@@ -570,6 +535,13 @@ struct ContentView: View {
 
     private func rawString() -> String {
         document.text
+    }
+
+    private var sourceTextBinding: Binding<String> {
+        Binding(
+            get: { document.text },
+            set: { document.updateSourceDraft($0) }
+        )
     }
 
 #if os(macOS)
@@ -748,7 +720,7 @@ struct ContentView: View {
             value: source.utf8.count
         )
         RawEditorPerformanceInstrumentation.measure("EditModeStatePreparation") {
-            rawDraft = source
+            document.beginSourceEditing()
             sourceScrollTarget = previewScrollPosition
             sourceSelectionLine = selectedSourceLine ?? previewScrollPosition.sourceLine
             sourceScrollRequest += 1
@@ -757,149 +729,30 @@ struct ContentView: View {
     }
 
     private func requestFinishRawEditing(commitChanges: Bool) {
-        guard pendingExternalText == nil else {
-            isExternalConflictPresented = true
-            return
-        }
-
-#if os(macOS)
-        guard let externalFileMonitor else {
-            finishRawEditing(commitChanges: commitChanges)
-            return
-        }
-        let draftSnapshot = rawDraft
-        externalResolutionGeneration += 1
-        let resolutionGeneration = externalResolutionGeneration
-        isResolvingExternalChange = true
-        Task {
-            let result = await externalFileMonitor.inspectForExternalChange()
-            guard externalResolutionGeneration == resolutionGeneration,
-                  isRawEditing,
-                  self.externalFileMonitor === externalFileMonitor else {
-                return
-            }
-            switch result {
-            case .unchanged:
-                if commitChanges {
-                    await keepRawDraft(
-                        draftSnapshot,
-                        using: externalFileMonitor,
-                        resolutionGeneration: resolutionGeneration
-                    )
-                } else {
-                    isResolvingExternalChange = false
-                    finishRawEditing(commitChanges: false)
-                }
-            case .changed(let text):
-                pendingExternalText = text
-                isResolvingExternalChange = false
-                isExternalConflictPresented = true
-            case .unavailable(let error):
-                isResolvingExternalChange = false
-                outputErrorTitle = "Unable to Check File"
-                outputErrorDescription = error.localizedDescription
-            case .cancelled:
-                isResolvingExternalChange = false
-            }
-        }
-#else
         finishRawEditing(commitChanges: commitChanges)
-#endif
     }
 
-    private func keepRawDraft() {
-#if os(macOS)
-        guard let externalFileMonitor else {
-            finishRawEditing(commitChanges: true)
-            return
-        }
-        let draftSnapshot = rawDraft
-        externalResolutionGeneration += 1
-        let resolutionGeneration = externalResolutionGeneration
-        isResolvingExternalChange = true
-        Task {
-            await keepRawDraft(
-                draftSnapshot,
-                using: externalFileMonitor,
-                resolutionGeneration: resolutionGeneration
-            )
-        }
-#else
-        finishRawEditing(commitChanges: true)
-#endif
-    }
-
-    private func useExternalVersion() {
-#if os(macOS)
-        guard let externalFileMonitor else {
-            return
-        }
-        externalResolutionGeneration += 1
-        let resolutionGeneration = externalResolutionGeneration
-        isResolvingExternalChange = true
-        Task {
-            do {
-                let currentText = try await externalFileMonitor.currentFileText()
-                guard externalResolutionGeneration == resolutionGeneration,
-                      isRawEditing,
-                      self.externalFileMonitor === externalFileMonitor else { return }
-                pendingExternalText = currentText
-                isResolvingExternalChange = false
-                finishRawEditing(commitChanges: false)
-            } catch {
-                guard externalResolutionGeneration == resolutionGeneration,
-                      self.externalFileMonitor === externalFileMonitor else { return }
-                isResolvingExternalChange = false
-                outputErrorTitle = "Unable to Load External Version"
-                outputErrorDescription = error.localizedDescription
-            }
-        }
-#else
-        finishRawEditing(commitChanges: false)
-#endif
-    }
-
-#if os(macOS)
-    private func keepRawDraft(
-        _ draft: String,
-        using externalFileMonitor: ExternalFileMonitor,
-        resolutionGeneration: Int
-    ) async {
-        do {
-            try await externalFileMonitor.replaceFile(with: draft)
-            guard externalResolutionGeneration == resolutionGeneration,
-                  isRawEditing,
-                  self.externalFileMonitor === externalFileMonitor else { return }
-            isResolvingExternalChange = false
-            finishRawEditing(commitChanges: true, committedText: draft)
-        } catch ExternalFileMonitor.ReplacementError.fileChanged(let text) {
-            guard externalResolutionGeneration == resolutionGeneration,
-                  self.externalFileMonitor === externalFileMonitor else { return }
-            pendingExternalText = text
-            isResolvingExternalChange = false
-            isExternalConflictPresented = true
-        } catch {
-            guard externalResolutionGeneration == resolutionGeneration,
-                  self.externalFileMonitor === externalFileMonitor else { return }
-            isResolvingExternalChange = false
-            outputErrorTitle = "Unable to Save Draft"
-            outputErrorDescription = error.localizedDescription
-        }
-    }
-#endif
-
-    private func finishRawEditing(commitChanges: Bool, committedText: String? = nil) {
+    private func finishRawEditing(commitChanges: Bool) {
         previewScrollTarget = sourceScrollPosition
         previewScrollRequest += 1
+        let selectedLocalVersion: Bool
         if commitChanges {
-            document.updateText(committedText ?? rawDraft)
-            pendingExternalText = nil
-        } else if let pendingExternalText {
-            document.updateText(pendingExternalText)
-            self.pendingExternalText = nil
+            selectedLocalVersion = document.commitSourceEditing()
+        } else {
+            selectedLocalVersion = document.cancelSourceEditing()
         }
-        isExternalChangeDetailsPresented = false
+#if os(macOS)
+        if selectedLocalVersion {
+            externalDocumentReloadCoordinator?.preserveLocalVersionForSaving()
+        }
+#endif
         isRawEditing = false
+#if os(macOS)
+        Task { @MainActor in
+            await Task.yield()
+            resumeDeferredExternalChange()
+        }
+#endif
     }
 
 #if os(macOS)
@@ -908,15 +761,90 @@ struct ContentView: View {
             return
         }
 
-        externalFileMonitor = ExternalFileMonitor(fileURL: fileURL, initialText: document.text) { text in
-            if isRawEditing {
-                pendingExternalText = text
-            } else {
-                previewScrollTarget = previewScrollPosition
-                previewScrollRequest += 1
-                document.updateText(text)
-            }
+        externalDocumentReloadCoordinator = ExternalDocumentReloadCoordinator(fileURL: fileURL)
+        externalFileMonitor = ExternalFileMonitor(fileURL: fileURL) {
+            handleExternalFileChange()
         }
+    }
+
+    private func handleExternalFileChange() {
+        guard let externalDocumentReloadCoordinator else { return }
+        cancelExternalReloadRetry()
+        let preservedPosition = previewScrollPosition
+        handleExternalReloadResult(
+            externalDocumentReloadCoordinator.handleChange(isEditing: isRawEditing),
+            preservedPosition: preservedPosition
+        )
+    }
+
+    private func resumeDeferredExternalChange() {
+        guard let externalDocumentReloadCoordinator,
+              let result = externalDocumentReloadCoordinator.resumeDeferredChange(
+                  isEditing: isRawEditing
+              ) else {
+            return
+        }
+        handleExternalReloadResult(result, preservedPosition: previewScrollPosition)
+    }
+
+    private func handleExternalReloadResult(
+        _ result: ExternalDocumentReloadCoordinator.Result,
+        preservedPosition: DocumentScrollPosition
+    ) {
+        switch result {
+        case .reloaded:
+            cancelExternalReloadRetry()
+            externalReloadErrorDescription = nil
+            previewScrollTarget = preservedPosition
+            Task { @MainActor in
+                await Task.yield()
+                previewScrollRequest += 1
+            }
+        case .failed(let error):
+            cancelExternalReloadRetry()
+            externalReloadErrorDescription = error.localizedDescription
+        case .unavailable:
+            scheduleExternalReloadRetry()
+        case .deferred:
+            cancelExternalReloadRetry()
+            break
+        }
+    }
+
+    private func scheduleExternalReloadRetry() {
+        guard externalReloadRetryAttempt < 4,
+              externalReloadRetryTask == nil,
+              let coordinator = externalDocumentReloadCoordinator else {
+            externalReloadErrorDescription =
+                "The document is not yet available to the system document controller."
+            return
+        }
+
+        externalReloadRetryAttempt += 1
+        externalReloadRetryTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(250))
+            guard Task.isCancelled == false,
+                  externalDocumentReloadCoordinator === coordinator else {
+                return
+            }
+            externalReloadRetryTask = nil
+            resumeDeferredExternalChange()
+        }
+    }
+
+    private func retryExternalReload() {
+        externalReloadErrorDescription = nil
+        externalReloadRetryAttempt = 0
+        Task { @MainActor in
+            await Task.yield()
+            resumeDeferredExternalChange()
+        }
+    }
+
+    private func cancelExternalReloadRetry() {
+        externalReloadRetryTask?.cancel()
+        externalReloadRetryTask = nil
+        externalReloadRetryAttempt = 0
     }
 #endif
 
@@ -1113,6 +1041,19 @@ struct ContentView: View {
             }
         )
     }
+
+#if os(macOS)
+    private var externalReloadErrorAlertPresented: Binding<Bool> {
+        Binding(
+            get: { externalReloadErrorDescription != nil },
+            set: {
+                if $0 == false {
+                    externalReloadErrorDescription = nil
+                }
+            }
+        )
+    }
+#endif
 
     private var activeErrorDescription: String? {
         localDocumentError ?? wikiNavigation.errorDescription

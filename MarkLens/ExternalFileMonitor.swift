@@ -1,376 +1,130 @@
 #if os(macOS)
+import AppKit
 import Darwin
 import Dispatch
 import Foundation
 
 @MainActor
 final class ExternalFileMonitor {
-    struct ReloadTiming {
-        var appendDelay: Duration
-        var rewriteQuietPeriod: Duration
-        var maximumRewriteDelay: Duration
-        var stabilityInterval: Duration
+    struct Timing {
+        var quietPeriod: Duration
+        var maximumDelay: Duration
         var reconnectDelay: Duration
 
-        nonisolated static let standard = ReloadTiming(
-            appendDelay: .seconds(1),
-            rewriteQuietPeriod: .seconds(3),
-            maximumRewriteDelay: .seconds(10),
-            stabilityInterval: .milliseconds(75),
+        nonisolated static let standard = Timing(
+            quietPeriod: .milliseconds(350),
+            maximumDelay: .seconds(2),
             reconnectDelay: .milliseconds(250)
         )
     }
 
-    enum InspectionResult {
-        case unchanged
-        case changed(String)
-        case unavailable(Error)
-        case cancelled
-    }
-
-    enum ReplacementError: Error {
-        case fileChanged(String)
-    }
-
-    typealias ChangeHandler = @MainActor (String) -> Void
+    typealias ChangeHandler = @MainActor () -> Void
 
     private let fileURL: URL
     private let changeHandler: ChangeHandler
-    private let timing: ReloadTiming
+    private let timing: Timing
     private let clock = ContinuousClock()
     private var source: DispatchSourceFileSystemObject?
-    private var reloadTask: Task<Void, Never>?
+    private var deliveryTask: Task<Void, Never>?
     private var reconnectTask: Task<Void, Never>?
-    private var lastContents: Data
     private var pendingChangeStartedAt: ContinuousClock.Instant?
     private var lastChangeDetectedAt: ContinuousClock.Instant?
-    private var pendingChangeIsRewrite = false
     private var generation: UInt64 = 0
     private var sourceGeneration: UInt64 = 0
     private var isActive = true
 
     init(
         fileURL: URL,
-        initialText: String,
-        timing: ReloadTiming = .standard,
+        timing: Timing = .standard,
         changeHandler: @escaping ChangeHandler
     ) {
         self.fileURL = fileURL.standardizedFileURL
         self.changeHandler = changeHandler
         self.timing = timing
-        self.lastContents = Data(initialText.utf8)
 
-        if installSource() {
-            refresh()
-        } else {
-            scheduleReconnect()
-        }
-    }
-
-    deinit {
-        reloadTask?.cancel()
-        reconnectTask?.cancel()
-        source?.cancel()
-    }
-
-    func refresh() {
-        recordDetectedChange()
-    }
-
-    func stop() {
-        invalidatePendingWork()
-        isActive = false
-        sourceGeneration &+= 1
-        source?.cancel()
-        source = nil
-    }
-
-    func inspectForExternalChange() async -> InspectionResult {
-        let operationGeneration = beginResolution()
-        do {
-            let contents = try await stableContents()
-            guard isCurrent(operationGeneration) else {
-                return .cancelled
-            }
-            replaceSource()
-            guard contents != lastContents else {
-                return .unchanged
-            }
-            guard let text = String(data: contents, encoding: .utf8) else {
-                return .unavailable(CocoaError(.fileReadInapplicableStringEncoding))
-            }
-            lastContents = contents
-            return .changed(text)
-        } catch {
-            guard isCurrent(operationGeneration) else {
-                return .cancelled
-            }
-            replaceSource()
-            return .unavailable(error)
-        }
-    }
-
-    func replaceFile(with text: String) async throws {
-        let operationGeneration = beginResolution()
-        guard isCurrent(operationGeneration) else {
-            throw CancellationError()
-        }
-        let expectedContents = lastContents
-        let currentContents = try await stableContents()
-        guard isCurrent(operationGeneration) else {
-            throw CancellationError()
-        }
-        guard currentContents == expectedContents else {
-            replaceSource()
-            guard let currentText = String(data: currentContents, encoding: .utf8) else {
-                throw CocoaError(.fileReadInapplicableStringEncoding)
-            }
-            lastContents = currentContents
-            throw ReplacementError.fileChanged(currentText)
-        }
-
-        let fileURL = fileURL
-        let contents = Data(text.utf8)
-        try await Task.detached(priority: .userInitiated) {
-            try contents.write(to: fileURL, options: .atomic)
-        }.value
-
-        guard isCurrent(operationGeneration) else {
-            throw CancellationError()
-        }
-        lastContents = contents
-        replaceSource()
-    }
-
-    func currentFileText() async throws -> String {
-        let operationGeneration = beginResolution()
-        guard isCurrent(operationGeneration) else {
-            throw CancellationError()
-        }
-        let contents = try await stableContents()
-        guard isCurrent(operationGeneration) else {
-            throw CancellationError()
-        }
-        guard let text = String(data: contents, encoding: .utf8) else {
-            throw CocoaError(.fileReadInapplicableStringEncoding)
-        }
-        lastContents = contents
-        replaceSource()
-        return text
-    }
-
-    private func scheduleReload() {
-        guard isActive,
-              let pendingChangeStartedAt,
-              let lastChangeDetectedAt else {
-            return
-        }
-        generation &+= 1
-        let reloadGeneration = generation
-        reloadTask?.cancel()
-        let deadline: ContinuousClock.Instant
-        if pendingChangeIsRewrite {
-            deadline = min(
-                lastChangeDetectedAt + timing.rewriteQuietPeriod,
-                pendingChangeStartedAt + timing.maximumRewriteDelay
-            )
-        } else {
-            deadline = pendingChangeStartedAt + timing.appendDelay
-        }
-        let delay = clock.now.duration(to: deadline)
-        reloadTask = Task { [weak self] in
-            do {
-                if delay > .zero {
-                    try await Task.sleep(for: delay)
-                }
-                guard let self else { return }
-                try await evaluatePendingChange(generation: reloadGeneration)
-            } catch is CancellationError {
-                return
-            } catch {
-                guard let self, isCurrent(reloadGeneration) else { return }
-                reinstallSourceAfterReadFailure()
-            }
-        }
-    }
-
-    private func evaluatePendingChange(generation reloadGeneration: UInt64) async throws {
-        let contents = try await readContents()
-        guard isCurrent(reloadGeneration) else {
-            return
-        }
-        guard contents != lastContents else {
-            clearPendingChange()
-            return
-        }
-
-        if contents.count > lastContents.count, contents.starts(with: lastContents) {
-            deliver(contents)
-            return
-        }
-
-        pendingChangeIsRewrite = true
-        guard let pendingChangeStartedAt, let lastChangeDetectedAt else {
-            return
-        }
-        let now = clock.now
-        if now >= pendingChangeStartedAt + timing.maximumRewriteDelay {
-            deliver(contents)
-        } else if now >= lastChangeDetectedAt + timing.rewriteQuietPeriod {
-            let stableContents = try await stableContents(startingWith: contents)
-            guard isCurrent(reloadGeneration) else {
-                return
-            }
-            deliver(stableContents)
-        } else {
-            scheduleReload()
-        }
-    }
-
-    private func deliver(_ contents: Data) {
-        guard let text = String(data: contents, encoding: .utf8) else {
-            scheduleRetry()
-            return
-        }
-        lastContents = contents
-        clearPendingChange()
-        changeHandler(text)
-    }
-
-    private func recordDetectedChange() {
-        guard isActive else {
-            return
-        }
-        let now = clock.now
-        if pendingChangeStartedAt == nil {
-            pendingChangeStartedAt = now
-            pendingChangeIsRewrite = false
-        }
-        lastChangeDetectedAt = now
-        scheduleReload()
-    }
-
-    private func scheduleRetry(after delay: Duration? = nil) {
-        guard isActive else {
-            return
-        }
-        generation &+= 1
-        let reloadGeneration = generation
-        reloadTask?.cancel()
-        reloadTask = Task { [weak self] in
-            do {
-                guard let self else { return }
-                try await Task.sleep(for: delay ?? timing.stabilityInterval)
-                try await evaluatePendingChange(generation: reloadGeneration)
-            } catch is CancellationError {
-                return
-            } catch {
-                guard let self, isCurrent(reloadGeneration) else { return }
-                reinstallSourceAfterReadFailure()
-            }
-        }
-    }
-
-    private func clearPendingChange() {
-        reloadTask = nil
-        pendingChangeStartedAt = nil
-        lastChangeDetectedAt = nil
-        pendingChangeIsRewrite = false
-    }
-
-    private func restartPendingChangeWindow() {
-        generation &+= 1
-        reloadTask?.cancel()
-        clearPendingChange()
-        recordDetectedChange()
-    }
-
-    private func stableContents() async throws -> Data {
-        let first = try await readContents()
-        return try await stableContents(startingWith: first)
-    }
-
-    private func stableContents(startingWith first: Data) async throws -> Data {
-        try await Task.sleep(for: timing.stabilityInterval)
-        let second = try await readContents()
-        guard first == second else {
-            throw CocoaError(.fileReadUnknown)
-        }
-        return second
-    }
-
-    private func readContents() async throws -> Data {
-        let fileURL = fileURL
-        return try await Task.detached(priority: .userInitiated) {
-            try Data(contentsOf: fileURL)
-        }.value
-    }
-
-    private func beginResolution() -> UInt64 {
-        invalidatePendingWork()
-        sourceGeneration &+= 1
-        source?.cancel()
-        source = nil
-        return generation
-    }
-
-    private func invalidatePendingWork() {
-        generation &+= 1
-        reloadTask?.cancel()
-        reloadTask = nil
-        reconnectTask?.cancel()
-        reconnectTask = nil
-        pendingChangeStartedAt = nil
-        lastChangeDetectedAt = nil
-        pendingChangeIsRewrite = false
-    }
-
-    private func isCurrent(_ operationGeneration: UInt64) -> Bool {
-        isActive && generation == operationGeneration && Task.isCancelled == false
-    }
-
-    private func replaceSource() {
-        sourceGeneration &+= 1
-        source?.cancel()
-        source = nil
-        guard isActive else {
-            return
-        }
-        if installSource() {
-            recordDetectedChange()
-        } else {
-            scheduleReconnect()
-        }
-    }
-
-    private func reinstallSourcePreservingPendingChange() {
-        sourceGeneration &+= 1
-        source?.cancel()
-        source = nil
-        guard isActive else {
-            return
-        }
         if installSource() == false {
             scheduleReconnect()
         }
     }
 
-    private func reinstallSourceAfterReadFailure() {
-        reinstallSourcePreservingPendingChange()
-        if source != nil {
-            scheduleRetry(after: timing.reconnectDelay)
+    deinit {
+        deliveryTask?.cancel()
+        reconnectTask?.cancel()
+        source?.cancel()
+    }
+
+    func stop() {
+        isActive = false
+        generation &+= 1
+        sourceGeneration &+= 1
+        deliveryTask?.cancel()
+        deliveryTask = nil
+        reconnectTask?.cancel()
+        reconnectTask = nil
+        source?.cancel()
+        source = nil
+        pendingChangeStartedAt = nil
+        lastChangeDetectedAt = nil
+    }
+
+    private func recordDetectedChange() {
+        guard isActive else { return }
+        let now = clock.now
+        if pendingChangeStartedAt == nil {
+            pendingChangeStartedAt = now
+        }
+        lastChangeDetectedAt = now
+        scheduleDelivery()
+    }
+
+    private func scheduleDelivery() {
+        guard isActive,
+              let pendingChangeStartedAt,
+              let lastChangeDetectedAt else {
+            return
+        }
+
+        generation &+= 1
+        let deliveryGeneration = generation
+        deliveryTask?.cancel()
+        let deadline = min(
+            lastChangeDetectedAt + timing.quietPeriod,
+            pendingChangeStartedAt + timing.maximumDelay
+        )
+        let delay = clock.now.duration(to: deadline)
+        deliveryTask = Task { [weak self] in
+            do {
+                if delay > .zero {
+                    try await Task.sleep(for: delay)
+                }
+                guard let self,
+                      isActive,
+                      generation == deliveryGeneration else {
+                    return
+                }
+                deliveryTask = nil
+                self.pendingChangeStartedAt = nil
+                self.lastChangeDetectedAt = nil
+                changeHandler()
+            } catch is CancellationError {
+                return
+            } catch {
+                return
+            }
         }
     }
 
     private func scheduleReconnect() {
+        guard isActive else { return }
         reconnectTask?.cancel()
-        let reconnectDelay = timing.reconnectDelay
         reconnectTask = Task { [weak self] in
             do {
-                try await Task.sleep(for: reconnectDelay)
-                guard let self, isActive else { return }
+                guard let self else { return }
+                try await Task.sleep(for: timing.reconnectDelay)
+                guard isActive else { return }
                 if installSource() {
-                    restartPendingChangeWindow()
+                    reconnectTask = nil
+                    recordDetectedChange()
                 } else {
                     scheduleReconnect()
                 }
@@ -381,13 +135,9 @@ final class ExternalFileMonitor {
     }
 
     private func installSource() -> Bool {
-        guard isActive else {
-            return false
-        }
+        guard isActive else { return false }
         let descriptor = open(fileURL.path, O_EVTONLY)
-        guard descriptor >= 0 else {
-            return false
-        }
+        guard descriptor >= 0 else { return false }
 
         let newSource = DispatchSource.makeFileSystemObjectSource(
             fileDescriptor: descriptor,
@@ -410,11 +160,131 @@ final class ExternalFileMonitor {
     }
 
     private func sourceDidChange(installedGeneration: UInt64) {
-        guard isActive, sourceGeneration == installedGeneration else {
-            return
-        }
+        guard isActive, sourceGeneration == installedGeneration else { return }
         recordDetectedChange()
-        reinstallSourcePreservingPendingChange()
+        sourceGeneration &+= 1
+        source?.cancel()
+        source = nil
+        if installSource() == false {
+            scheduleReconnect()
+        }
+    }
+}
+
+@MainActor
+protocol ManagedDocumentReloading: AnyObject {
+    var hasLocalChanges: Bool { get }
+    func markLocalVersionForSaving()
+    func reloadFromDisk() throws
+}
+
+@MainActor
+private final class AppKitManagedDocument: ManagedDocumentReloading {
+    private let document: NSDocument
+
+    init(document: NSDocument) {
+        self.document = document
+    }
+
+    var hasLocalChanges: Bool {
+        document.isDocumentEdited || document.hasUnautosavedChanges
+    }
+
+    func markLocalVersionForSaving() {
+        document.updateChangeCount(.changeDone)
+    }
+
+    func reloadFromDisk() throws {
+        guard let fileURL = document.fileURL, let fileType = document.fileType else {
+            throw CocoaError(.fileNoSuchFile)
+        }
+        try document.revert(toContentsOf: fileURL, ofType: fileType)
+    }
+}
+
+@MainActor
+final class ExternalDocumentReloadCoordinator {
+    enum Result {
+        case deferred
+        case reloaded
+        case unavailable
+        case failed(Error)
+    }
+
+    typealias Resolver = @MainActor (URL) -> (any ManagedDocumentReloading)?
+    private let fileURL: URL
+    private let resolver: Resolver
+    private(set) var hasDeferredChange = false
+    private var hasPendingLocalVersion = false
+    private var didRequestPendingLocalSave = false
+    private var didObservePendingLocalChanges = false
+
+    init(fileURL: URL, resolver: Resolver? = nil) {
+        self.fileURL = fileURL.standardizedFileURL
+        self.resolver = resolver ?? ExternalDocumentReloadCoordinator.resolveDocument
+    }
+
+    func handleChange(isEditing: Bool) -> Result {
+        guard let document = resolver(fileURL) else {
+            hasDeferredChange = true
+            return .unavailable
+        }
+
+        if hasPendingLocalVersion {
+            if didRequestPendingLocalSave == false {
+                document.markLocalVersionForSaving()
+                didRequestPendingLocalSave = true
+            }
+            if document.hasLocalChanges {
+                didObservePendingLocalChanges = true
+                hasDeferredChange = true
+                return .deferred
+            }
+            guard didObservePendingLocalChanges else {
+                hasDeferredChange = true
+                return .deferred
+            }
+            hasPendingLocalVersion = false
+            didRequestPendingLocalSave = false
+            didObservePendingLocalChanges = false
+        }
+
+        guard isEditing == false, document.hasLocalChanges == false else {
+            hasDeferredChange = true
+            return .deferred
+        }
+
+        do {
+            try document.reloadFromDisk()
+            hasDeferredChange = false
+            return .reloaded
+        } catch {
+            hasDeferredChange = true
+            return .failed(error)
+        }
+    }
+
+    func resumeDeferredChange(isEditing: Bool) -> Result? {
+        guard hasDeferredChange else { return nil }
+        return handleChange(isEditing: isEditing)
+    }
+
+    func preserveLocalVersionForSaving() {
+        hasDeferredChange = true
+        hasPendingLocalVersion = true
+        didRequestPendingLocalSave = false
+        didObservePendingLocalChanges = false
+        guard let document = resolver(fileURL) else { return }
+        document.markLocalVersionForSaving()
+        didRequestPendingLocalSave = true
+        didObservePendingLocalChanges = document.hasLocalChanges
+    }
+
+    private static func resolveDocument(at fileURL: URL) -> (any ManagedDocumentReloading)? {
+        guard let document = NSDocumentController.shared.document(for: fileURL) else {
+            return nil
+        }
+        return AppKitManagedDocument(document: document)
     }
 }
 #endif

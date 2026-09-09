@@ -30,6 +30,14 @@ final class MarkLensUITests: XCTestCase {
     }
 
     @MainActor
+    func testSourceDraftAutosavesAndCancelRestoresBaseline() throws {
+        let preview = XCUIApplication().openDocument(named: "sample", fileExtension: "md")
+        defer { preview.terminate() }
+
+        try preview.verifySourceDraftAutosavesAndCancelRestoresBaseline()
+    }
+
+    @MainActor
     func testCreatesStarterDocument() throws {
         let preview = XCUIApplication().openDocument(named: "sample", fileExtension: "md")
         defer { preview.terminate() }
@@ -609,6 +617,51 @@ private struct MarkLensAppHandle {
             remainsStable(target, near: originalY),
             "Expected active Find reconstruction not to override the restored position."
         )
+    }
+
+    func verifySourceDraftAutosavesAndCancelRestoresBaseline() throws {
+        let documentURL = try XCTUnwrap(documentURL)
+        let originalText = try String(contentsOf: documentURL, encoding: .utf8)
+        let draftText = "# Autosaved source draft\n\nLiteral Markdown content."
+
+        contentView.typeKey("e", modifierFlags: .command)
+        let sourceEditor = app.textViews["Markdown source editor"].firstMatch
+        XCTAssertTrue(
+            sourceEditor.waitForExistence(timeout: 5),
+            "Expected the source editor to open."
+        )
+        sourceEditor.typeKey("a", modifierFlags: .command)
+        sourceEditor.typeText(draftText)
+
+        let finder = XCUIApplication(bundleIdentifier: "com.apple.finder")
+        finder.activate()
+        XCTAssertTrue(
+            waitForFile(documentURL, toEqual: draftText, timeout: 8),
+            "Expected background autosave to persist the visible source draft."
+        )
+
+        app.activate()
+        XCTAssertTrue(sourceEditor.waitForExistence(timeout: 5))
+        XCTAssertEqual(sourceEditor.value as? String, draftText)
+        XCTAssertFalse(app.alerts["File Changed Externally"].exists)
+
+        app.buttons["Cancel"].firstMatch.click()
+        finder.activate()
+        XCTAssertTrue(
+            waitForFile(documentURL, toEqual: originalText, timeout: 8),
+            "Expected Cancel to autosave the restored edit-session baseline."
+        )
+    }
+
+    private func waitForFile(_ url: URL, toEqual expectedText: String, timeout: TimeInterval) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if (try? String(contentsOf: url, encoding: .utf8)) == expectedText {
+                return true
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+        }
+        return false
     }
 
     private func waitUntilHittable(_ element: XCUIElement, timeout: TimeInterval = 5) -> Bool {

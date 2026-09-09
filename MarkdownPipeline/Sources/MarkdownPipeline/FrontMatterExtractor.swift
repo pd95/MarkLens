@@ -618,7 +618,7 @@ private struct FlowValueParser {
         case "\"": return .scalar(.string(try parseDoubleQuoted()), line: line)
         case "'": return .scalar(.string(try parseSingleQuoted()), line: line)
         case "&", "*", "!": throw failure("Anchors, aliases, and custom tags are not supported.")
-        default: return .scalar(parsePlain(), line: line)
+        default: return .scalar(parsePlain(inFlowCollection: depth > 0), line: line)
         }
     }
 
@@ -714,9 +714,12 @@ private struct FlowValueParser {
         throw failure("Unterminated single-quoted string.")
     }
 
-    private mutating func parsePlain() -> FrontMatterScalar {
+    private mutating func parsePlain(inFlowCollection: Bool) -> FrontMatterScalar {
         let start = index
-        while index < text.endIndex, [",", "]", "}"].contains(text[index]) == false { advance() }
+        while index < text.endIndex {
+            if inFlowCollection, [",", "]", "}"].contains(text[index]) { break }
+            advance()
+        }
         let raw = String(text[start..<index]).trimmingCharacters(in: .whitespaces)
         if raw == "null" || raw == "~" { return .null }
         if raw == "true" { return .boolean(true) }

@@ -4,7 +4,7 @@ enum FrontMatterRenderer {
     static let startMarker = "<!-- marklens-frontmatter:start -->"
     static let endMarker = "<!-- marklens-frontmatter:end -->"
 
-    static func render(_ frontMatter: FrontMatter) -> String {
+    static func render(_ frontMatter: FrontMatter, plugins: HTMLPluginCoordinator) -> String {
         let summaryTitle = frontMatter.title.map {
             let source = frontMatter.titleLine.map(sourceAttribute) ?? ""
             return "<span class=\"frontmatter-summary-title\"\(source)>\($0.encodedHTMLEntities())</span>"
@@ -29,7 +29,7 @@ enum FrontMatterRenderer {
             result += frontMatter.raw.encodedHTMLEntities()
             result += "</code></pre>\n"
         } else if let root = frontMatter.root {
-            result += renderRoot(root)
+            result += renderRoot(root, plugins: plugins)
         } else {
             result += "<p class=\"frontmatter-empty\">No values</p>\n"
         }
@@ -47,69 +47,85 @@ enum FrontMatterRenderer {
         }
     }
 
-    private static func renderRoot(_ root: FrontMatterValue) -> String {
+    private static func renderRoot(
+        _ root: FrontMatterValue,
+        plugins: HTMLPluginCoordinator
+    ) -> String {
         switch root {
         case .mapping(let pairs, _):
-            return pairs.map(renderPair).joined()
+            return pairs.map { renderPair($0, plugins: plugins) }.joined()
         default:
-            return "<div class=\"frontmatter-generic-root\">\(renderValue(root))</div>\n"
+            return "<div class=\"frontmatter-generic-root\">\(renderValue(root, plugins: plugins))</div>\n"
         }
     }
 
-    private static func renderPair(_ pair: FrontMatterPair) -> String {
+    private static func renderPair(
+        _ pair: FrontMatterPair,
+        plugins: HTMLPluginCoordinator
+    ) -> String {
         let kind = recognizedKind(for: pair.key, value: pair.value)
         let source = sourceAttribute(pair.keyLine)
         switch kind {
         case .title:
-            return "<div class=\"frontmatter-print-title\">\(renderInlineValue(pair.value))</div>\n"
+            return "<div class=\"frontmatter-print-title\">\(renderInlineValue(pair.value, plugins: plugins))</div>\n"
         case .prose:
-            return "<div class=\"frontmatter-prose\"\(source)><div class=\"frontmatter-label\">\(displayLabel(pair.key))</div>\(renderInlineValue(pair.value))</div>\n"
+            return "<div class=\"frontmatter-prose\"\(source)><div class=\"frontmatter-label\">\(displayLabel(pair.key))</div>\(renderInlineValue(pair.value, plugins: plugins))</div>\n"
         case .chips:
-            return "<div class=\"frontmatter-field frontmatter-chip-field\"\(source)><div class=\"frontmatter-label\">\(displayLabel(pair.key))</div>\(renderChips(pair.value))</div>\n"
+            return "<div class=\"frontmatter-field frontmatter-chip-field\"\(source)><div class=\"frontmatter-label\">\(displayLabel(pair.key))</div>\(renderChips(pair.value, plugins: plugins))</div>\n"
         case .questions:
-            return "<div class=\"frontmatter-field frontmatter-questions\"\(source)><div class=\"frontmatter-label\">\(displayLabel(pair.key))</div>\(renderSequenceAsList(pair.value))</div>\n"
+            return "<div class=\"frontmatter-field frontmatter-questions\"\(source)><div class=\"frontmatter-label\">\(displayLabel(pair.key))</div>\(renderSequenceAsList(pair.value, plugins: plugins))</div>\n"
         case .status:
-            return "<div class=\"frontmatter-field frontmatter-compact-field\"\(source)><span class=\"frontmatter-label\">\(displayLabel(pair.key))</span><span class=\"frontmatter-status\">\(renderInlineValue(pair.value))</span></div>\n"
+            return "<div class=\"frontmatter-field frontmatter-compact-field\"\(source)><span class=\"frontmatter-label\">\(displayLabel(pair.key))</span><span class=\"frontmatter-status\">\(renderInlineValue(pair.value, plugins: plugins))</span></div>\n"
         case .date, .authors:
-            return "<div class=\"frontmatter-field frontmatter-compact-field\"\(source)><span class=\"frontmatter-label\">\(displayLabel(pair.key))</span>\(renderInlineValue(pair.value))</div>\n"
+            return "<div class=\"frontmatter-field frontmatter-compact-field\"\(source)><span class=\"frontmatter-label\">\(displayLabel(pair.key))</span>\(renderInlineValue(pair.value, plugins: plugins))</div>\n"
         case .generic:
-            return "<div class=\"frontmatter-field\"\(source)><div class=\"frontmatter-label\">\(displayLabel(pair.key))</div>\(renderValue(pair.value))</div>\n"
+            return "<div class=\"frontmatter-field\"\(source)><div class=\"frontmatter-label\">\(displayLabel(pair.key))</div>\(renderValue(pair.value, plugins: plugins))</div>\n"
         }
     }
 
-    private static func renderValue(_ value: FrontMatterValue) -> String {
+    private static func renderValue(
+        _ value: FrontMatterValue,
+        plugins: HTMLPluginCoordinator
+    ) -> String {
         switch value {
         case .scalar(let scalar, _):
-            return renderScalar(scalar)
+            return renderScalar(scalar, plugins: plugins)
         case .blockString(_, let sourceLines, let style, let chomping, let line, let endLine):
             return renderBlockString(
                 sourceLines,
                 style: style,
                 chomping: chomping,
                 line: line,
-                endLine: endLine
+                endLine: endLine,
+                plugins: plugins
             )
         case .sequence:
-            return renderSequenceAsList(value)
+            return renderSequenceAsList(value, plugins: plugins)
         case .mapping(let pairs, _):
             var result = "<dl class=\"frontmatter-map\">\n"
             for pair in pairs {
                 result += "<div class=\"frontmatter-map-entry\"\(sourceAttribute(pair.keyLine))>"
-                result += "<dt>\(displayLabel(pair.key))</dt><dd>\(renderValue(pair.value))</dd></div>\n"
+                result += "<dt>\(displayLabel(pair.key))</dt><dd>\(renderValue(pair.value, plugins: plugins))</dd></div>\n"
             }
             return result + "</dl>\n"
         }
     }
 
-    private static func renderInlineValue(_ value: FrontMatterValue) -> String {
+    private static func renderInlineValue(
+        _ value: FrontMatterValue,
+        plugins: HTMLPluginCoordinator
+    ) -> String {
         switch value {
-        case .scalar(let scalar, _): renderScalar(scalar)
-        case .blockString: renderValue(value)
-        default: renderValue(value)
+        case .scalar(let scalar, _): renderScalar(scalar, plugins: plugins)
+        case .blockString: renderValue(value, plugins: plugins)
+        default: renderValue(value, plugins: plugins)
         }
     }
 
-    private static func renderScalar(_ scalar: FrontMatterScalar) -> String {
+    private static func renderScalar(
+        _ scalar: FrontMatterScalar,
+        plugins: HTMLPluginCoordinator
+    ) -> String {
         let className: String
         switch scalar {
         case .string: className = "frontmatter-string"
@@ -117,7 +133,13 @@ enum FrontMatterRenderer {
         case .integer, .number: className = "frontmatter-number"
         case .null: className = "frontmatter-null"
         }
-        return "<span class=\"\(className)\">\(scalar.displayText.encodedHTMLEntities())</span>"
+        let content: String
+        if case .string(let value) = scalar {
+            content = plugins.renderText(value, allowsWikiLinks: true)
+        } else {
+            content = scalar.displayText.encodedHTMLEntities()
+        }
+        return "<span class=\"\(className)\">\(content)</span>"
     }
 
     private static func renderBlockString(
@@ -125,7 +147,8 @@ enum FrontMatterRenderer {
         style: Character,
         chomping: Character?,
         line: Int,
-        endLine: Int
+        endLine: Int,
+        plugins: HTMLPluginCoordinator
     ) -> String {
         var displayedLines = sourceLines
         if chomping != "+" {
@@ -139,28 +162,36 @@ enum FrontMatterRenderer {
                     ? " " : "\n"
             }
             content += "<span data-marklens-source-line=\"\(sourceLine.sourceLine)\">"
-            content += sourceLine.text.encodedHTMLEntities()
+            content += plugins.renderText(sourceLine.text, allowsWikiLinks: true)
             content += "</span>"
         }
         if displayedLines.isEmpty == false, chomping != "-" { content += "\n" }
         return "<span class=\"frontmatter-string\"\(sourceRangeAttribute(line: line, endLine: endLine))>\(content)</span>"
     }
 
-    private static func renderSequenceAsList(_ value: FrontMatterValue) -> String {
-        guard case .sequence(let values, _) = value else { return renderInlineValue(value) }
+    private static func renderSequenceAsList(
+        _ value: FrontMatterValue,
+        plugins: HTMLPluginCoordinator
+    ) -> String {
+        guard case .sequence(let values, _) = value else {
+            return renderInlineValue(value, plugins: plugins)
+        }
         var result = "<ul class=\"frontmatter-list\">\n"
         for item in values {
-            result += "<li\(sourceAttribute(item.line))>\(renderValue(item))</li>\n"
+            result += "<li\(sourceAttribute(item.line))>\(renderValue(item, plugins: plugins))</li>\n"
         }
         return result + "</ul>\n"
     }
 
-    private static func renderChips(_ value: FrontMatterValue) -> String {
+    private static func renderChips(
+        _ value: FrontMatterValue,
+        plugins: HTMLPluginCoordinator
+    ) -> String {
         let values: [FrontMatterValue]
         if case .sequence(let sequence, _) = value { values = sequence } else { values = [value] }
         var result = "<ul class=\"frontmatter-chips\">\n"
         for item in values {
-            result += "<li\(sourceAttribute(item.line))>\(renderInlineValue(item))</li>\n"
+            result += "<li\(sourceAttribute(item.line))>\(renderInlineValue(item, plugins: plugins))</li>\n"
         }
         return result + "</ul>\n"
     }

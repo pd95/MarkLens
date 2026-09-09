@@ -84,6 +84,33 @@ struct FrontMatterTests {
         #expect(contributorPairs.map(\.key) == ["name", "role"])
     }
 
+    @Test func parsesCommasInPlainMappingScalars() {
+        let input = """
+        ---
+        title: Database cloning
+        type: procedure
+        description: Evidence-backed procedure and acceptance model for physically cloning an enterprise database, including container preparation and monitoring.
+        tags: [database, cloning, operations, containers]
+        status: developing
+        updated: 2026-09-09
+        sources:
+          - "[[2026-09-09-database-clone-evidence]]"
+        ---
+
+        # Database cloning
+        """
+        let result = FrontMatterExtractor().extract(from: input)
+
+        #expect(result.frontMatter?.parseError == nil)
+        guard case .mapping(let pairs, _)? = result.frontMatter?.root else {
+            Issue.record("Expected a top-level mapping")
+            return
+        }
+        #expect(pairs.first(where: { $0.key == "description" })?.value.stringValue ==
+            "Evidence-backed procedure and acceptance model for physically cloning an enterprise database, including container preparation and monitoring.")
+        #expect(result.bodyMarkdown == "\n# Database cloning")
+    }
+
     @Test func parsesBlockScalarsAndStrictScalarTypes() {
         let input = """
         ---
@@ -165,6 +192,26 @@ struct FrontMatterTests {
         #expect(tags.compactMap(\.stringValue) == ["one", "two"])
         #expect(options.map(\.key) == ["draft", "count"])
         #expect(result.frontMatter?.parseError == nil)
+    }
+
+    @Test func treatsUnquotedDoubleBracketsAsNestedYAMLSequences() {
+        let input = """
+        ---
+        sources:
+          - [[database-clone-evidence]]
+        ---
+        Body
+        """
+        let result = FrontMatterExtractor().extract(from: input)
+
+        guard case .mapping(let pairs, _)? = result.frontMatter?.root,
+              case .sequence(let sources, _) = pairs[0].value,
+              case .sequence(let outerFlowSequence, _) = sources[0],
+              case .sequence(let innerFlowSequence, _) = outerFlowSequence[0] else {
+            Issue.record("Expected standards-compliant nested YAML sequences")
+            return
+        }
+        #expect(innerFlowSequence[0].stringValue == "database-clone-evidence")
     }
 
     @Test func preservesTitleAndThemeWhenRichParsingFallsBack() throws {
@@ -260,6 +307,42 @@ struct FrontMatterTests {
         #expect(document.html.contains("&lt;script&gt;alert(1)&lt;/script&gt;"))
         #expect(document.html.contains("<script>alert(1)</script>") == false)
         #expect(document.html.contains("data-marklens-source-line=\"11\">Body</h1>"))
+    }
+
+    @Test func rendersWikiLinksInFrontMatterValues() throws {
+        let input = """
+        ---
+        description: 'A detailed explanation that refers to [[database-clone-evidence|the supporting evidence]] while continuing with more text.'
+        sources:
+          - "[[database-clone-evidence]]"
+        ---
+        Body
+        """
+        let document = try MarkdownPipeline.defaultHTML().renderHTML(from: .string(input))
+
+        #expect(document.containsWikiLinks)
+        #expect(document.html.contains(
+            "href=\"marklens-wikilink://open?target=database-clone-evidence\""
+        ))
+        #expect(document.html.contains(">database-clone-evidence</a>"))
+        #expect(document.html.contains(">the supporting evidence</a>"))
+        #expect(document.html.contains("A detailed explanation that refers to <a href="))
+        #expect(document.html.contains("</a> while continuing with more text."))
+    }
+
+    @Test func leavesFrontMatterWikiLinksAsTextWhenFeatureIsDisabled() throws {
+        let input = """
+        ---
+        sources:
+          - "[[database-clone-evidence]]"
+        ---
+        Body
+        """
+        let document = try MarkdownPipeline(plugins: []).renderHTML(from: .string(input))
+
+        #expect(document.containsWikiLinks == false)
+        #expect(document.html.contains("[[database-clone-evidence]]"))
+        #expect(document.html.contains("data-marklens-wikilink") == false)
     }
 
     @Test func blockScalarRenderingIncludesItsSourceLineRange() throws {

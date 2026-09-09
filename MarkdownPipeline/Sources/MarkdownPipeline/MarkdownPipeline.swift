@@ -54,7 +54,9 @@ public struct MarkdownPipeline: Sendable {
                     context: mergedContext
                 )
             }
-            let frontMatterHTML = extraction.frontMatter.map(FrontMatterRenderer.render) ?? ""
+            let frontMatterHTML = extraction.frontMatter.map {
+                FrontMatterRenderer.render($0, plugins: coordinator)
+            } ?? ""
             let contribution = try PipelineInstrumentation.measure("PluginAssets") {
                 try coordinator.contribution()
             }

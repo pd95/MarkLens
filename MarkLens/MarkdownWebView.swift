@@ -264,6 +264,8 @@ struct MarkdownWebView: PlatformViewRepresentable {
         var activeOutputRequest: RenderedDocumentOutputRequest?
         var latestScrollRequest = 0
         var latestScrollContentVersion: ContentVersion?
+        var lastConfirmedScrollRequest: Int?
+        var lastConfirmedScrollContentVersion: ContentVersion?
         var latestFrontMatterExpanded: Bool?
         var latestSourceEditPositionRequest: UUID?
         weak var reloadSnapshotView: PlatformImageView?
@@ -437,6 +439,19 @@ struct MarkdownWebView: PlatformViewRepresentable {
                 viewportOffset: min(max(viewportOffset, -100_000), 100_000)
             )
             let restorationRequest = Self.optionalIntValue(value["restorationRequest"])
+            if let restorationRequest {
+                let confirmationIsNew = restorationRequest != lastConfirmedScrollRequest
+                    || latestScrollContentVersion != lastConfirmedScrollContentVersion
+                if confirmationIsNew {
+                    lastConfirmedScrollRequest = restorationRequest
+                    lastConfirmedScrollContentVersion = latestScrollContentVersion
+                    WikiScrollDiagnostics.restoreConfirmed(
+                        location: diagnosticLocation,
+                        request: restorationRequest,
+                        position: position
+                    )
+                }
+            }
             Task { @MainActor in
                 self.parent.scrollPosition = position
                 if let restorationRequest {
@@ -478,6 +493,11 @@ struct MarkdownWebView: PlatformViewRepresentable {
             }
             latestScrollRequest = parent.scrollRequest
             latestScrollContentVersion = parent.contentVersion
+            WikiScrollDiagnostics.restoreApplied(
+                location: diagnosticLocation,
+                request: parent.scrollRequest,
+                position: parent.scrollTarget
+            )
             let arguments: [String: Any] = [
                 "request": parent.scrollRequest,
                 "line": parent.scrollTarget.sourceLine.map { $0 as Any } ?? NSNull(),
@@ -496,6 +516,10 @@ struct MarkdownWebView: PlatformViewRepresentable {
             webView.evaluateJavaScript("window.MarkLensScroll.restore(\(json));") { _, _ in
                 completion?()
             }
+        }
+
+        private var diagnosticLocation: String {
+            parent.documentURL?.lastPathComponent ?? "untitled"
         }
 
         var needsScrollRestoration: Bool {
@@ -986,6 +1010,12 @@ struct MarkdownWebView: PlatformViewRepresentable {
                   navigation === activeContentNavigation else {
                 return
             }
+            WikiScrollDiagnostics.loadFinished(
+                location: diagnosticLocation,
+                requested: parent.scrollRequest,
+                applied: latestScrollRequest,
+                requiresRestore: needsScrollRestoration
+            )
             endWebViewLoad()
             isPageReady = true
             if parent.contentVersion != latestContentVersion {

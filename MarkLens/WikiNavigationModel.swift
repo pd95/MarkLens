@@ -133,6 +133,12 @@ final class WikiNavigationModel: ObservableObject {
         renderingPreferences: RenderingPreferences = .secureDefaults,
         leavingScrollPosition: DocumentScrollPosition = .top
     ) {
+        WikiScrollDiagnostics.captured(
+            action: "navigate",
+            from: diagnosticName(for: current),
+            to: url.lastPathComponent,
+            position: leavingScrollPosition
+        )
         navigationGeneration += 1
         let generation = navigationGeneration
         loadTask?.cancel()
@@ -297,6 +303,12 @@ final class WikiNavigationModel: ObservableObject {
         leavingScrollPosition: DocumentScrollPosition = .top
     ) -> WikiHistoryNavigation? {
         guard let destination = backStack.popLast() else { return nil }
+        WikiScrollDiagnostics.captured(
+            action: "back",
+            from: diagnosticName(for: current),
+            to: diagnosticName(for: destination.location),
+            position: leavingScrollPosition
+        )
         cancelLoading()
         errorDescription = nil
         forwardStack.append(WikiHistoryEntry(
@@ -319,6 +331,12 @@ final class WikiNavigationModel: ObservableObject {
         leavingScrollPosition: DocumentScrollPosition = .top
     ) -> WikiHistoryNavigation? {
         guard let destination = forwardStack.popLast() else { return nil }
+        WikiScrollDiagnostics.captured(
+            action: "forward",
+            from: diagnosticName(for: current),
+            to: diagnosticName(for: destination.location),
+            position: leavingScrollPosition
+        )
         cancelLoading()
         errorDescription = nil
         backStack.append(WikiHistoryEntry(
@@ -369,6 +387,15 @@ final class WikiNavigationModel: ObservableObject {
     private func page(for location: WikiLocation) -> WikiPage? {
         guard case .page(let url) = location else { return nil }
         return pageCache[url]
+    }
+
+    private func diagnosticName(for location: WikiLocation) -> String {
+        switch location {
+        case .root:
+            return "root"
+        case .page(let url):
+            return url.lastPathComponent
+        }
     }
 
     private func trimHistory() {

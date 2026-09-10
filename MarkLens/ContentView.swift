@@ -8,6 +8,9 @@
 import SwiftUI
 import UniformTypeIdentifiers
 import MarkdownPipeline
+#if canImport(os)
+import os
+#endif
 #if os(macOS)
 import AppKit
 #endif
@@ -22,6 +25,14 @@ nonisolated struct DocumentScrollPosition: Equatable, Sendable {
     var viewportOffset: Double = 0
 
     static let top = DocumentScrollPosition(sourceLine: 1, progress: 0)
+
+#if DEBUG
+    var diagnosticDescription: String {
+        let line = sourceLine.map(String.init) ?? "nil"
+        let occurrence = anchorOccurrence.map(String.init) ?? "nil"
+        return "line=\(line) progress=\(progress) anchor=\(anchorIdentity ?? "nil") occurrence=\(occurrence) offset=\(viewportOffset)"
+    }
+#endif
 }
 
 nonisolated enum WikiRefreshScrollRestoration {
@@ -39,6 +50,99 @@ nonisolated enum WikiRefreshScrollRestoration {
             return confirmedRequest >= request ? currentPosition : position
         }
     }
+}
+
+nonisolated enum WikiScrollDiagnostics {
+#if DEBUG && canImport(os)
+    private static let logger = Logger(
+        subsystem: "ch.doapp.MarkLens",
+        category: "WikiScroll"
+    )
+
+    static func captured(
+        action: String,
+        from: String,
+        to: String,
+        position: DocumentScrollPosition
+    ) {
+        logger.debug(
+            "CAPTURE action=\(action, privacy: .public) from=\(from, privacy: .private) to=\(to, privacy: .private) \(position.diagnosticDescription, privacy: .private)"
+        )
+    }
+
+    static func restoreRequested(
+        location: String,
+        request: Int,
+        position: DocumentScrollPosition
+    ) {
+        logger.debug(
+            "REQUEST location=\(location, privacy: .private) request=\(request, privacy: .public) \(position.diagnosticDescription, privacy: .private)"
+        )
+    }
+
+    static func loadFinished(
+        location: String,
+        requested: Int,
+        applied: Int,
+        requiresRestore: Bool
+    ) {
+        logger.debug(
+            "LOAD_FINISHED location=\(location, privacy: .private) requested=\(requested, privacy: .public) applied=\(applied, privacy: .public) pending=\(requiresRestore, privacy: .public)"
+        )
+    }
+
+    static func restoreApplied(
+        location: String,
+        request: Int,
+        position: DocumentScrollPosition
+    ) {
+        logger.debug(
+            "APPLY location=\(location, privacy: .private) request=\(request, privacy: .public) \(position.diagnosticDescription, privacy: .private)"
+        )
+    }
+
+    static func restoreConfirmed(
+        location: String,
+        request: Int,
+        position: DocumentScrollPosition
+    ) {
+        logger.debug(
+            "CONFIRM location=\(location, privacy: .private) request=\(request, privacy: .public) \(position.diagnosticDescription, privacy: .private)"
+        )
+    }
+#else
+    static func captured(
+        action: String,
+        from: String,
+        to: String,
+        position: DocumentScrollPosition
+    ) {}
+
+    static func restoreRequested(
+        location: String,
+        request: Int,
+        position: DocumentScrollPosition
+    ) {}
+
+    static func loadFinished(
+        location: String,
+        requested: Int,
+        applied: Int,
+        requiresRestore: Bool
+    ) {}
+
+    static func restoreApplied(
+        location: String,
+        request: Int,
+        position: DocumentScrollPosition
+    ) {}
+
+    static func restoreConfirmed(
+        location: String,
+        request: Int,
+        position: DocumentScrollPosition
+    ) {}
+#endif
 }
 
 private enum FrontMatterPageKey: Hashable {
@@ -926,6 +1030,11 @@ struct ContentView: View {
     private func restorePreviewScroll(to position: DocumentScrollPosition) -> Int {
         previewScrollTarget = position
         previewScrollRequest += 1
+        WikiScrollDiagnostics.restoreRequested(
+            location: displayedURL?.lastPathComponent ?? "untitled",
+            request: previewScrollRequest,
+            position: position
+        )
         return previewScrollRequest
     }
 

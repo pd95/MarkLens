@@ -165,7 +165,7 @@ struct MarkdownWebView: PlatformViewRepresentable {
 #endif
         context.coordinator.authorizeInternalLoad()
         context.coordinator.beginWebViewLoad()
-        webView.loadHTMLString(
+        context.coordinator.activeContentNavigation = webView.loadHTMLString(
             FrontMatterHTMLState.applying(expanded: frontMatterExpanded, to: html),
             baseURL: baseURL
         )
@@ -195,6 +195,7 @@ struct MarkdownWebView: PlatformViewRepresentable {
         coordinator.removeReloadSnapshot()
         coordinator.endWebViewLoad()
         coordinator.endWebViewPostProcessing()
+        coordinator.activeContentNavigation = nil
         coordinator.webView = nil
     }
 
@@ -226,7 +227,7 @@ struct MarkdownWebView: PlatformViewRepresentable {
 
     // MARK: - Coordinator
 
-    fileprivate struct ContentVersion: Equatable {
+    struct ContentVersion: Equatable {
         let identity: String
         let documentURL: URL?
         let reloadRequest: Int
@@ -249,7 +250,7 @@ struct MarkdownWebView: PlatformViewRepresentable {
 #endif
 
         var isPageReady = false
-        fileprivate var latestContentVersion: ContentVersion?
+        var latestContentVersion: ContentVersion?
         var latestFindTerm = ""
         var latestFindRequest = 0
         var latestFindAnchorRequest = 0
@@ -259,10 +260,12 @@ struct MarkdownWebView: PlatformViewRepresentable {
         var pendingOutputRequest: RenderedDocumentOutputRequest?
         var activeOutputRequest: RenderedDocumentOutputRequest?
         var latestScrollRequest = 0
+        var latestScrollContentVersion: ContentVersion?
         var latestFrontMatterExpanded: Bool?
         var latestSourceEditPositionRequest: UUID?
         weak var reloadSnapshotView: PlatformImageView?
         var reloadGeneration = 0
+        var activeContentNavigation: WKNavigation?
         private var isInternalLoadAuthorized = false
 #if canImport(os)
         private static let performanceLog = OSLog(
@@ -343,7 +346,7 @@ struct MarkdownWebView: PlatformViewRepresentable {
             let findChanged = findTermChanged || parent.findRequest != latestFindRequest
             let findAnchorChanged = parent.findAnchorRequest != latestFindAnchorRequest
             let customCSSChanged = parent.customCSS != latestCustomCSS
-            let scrollChanged = parent.scrollRequest != latestScrollRequest
+            let scrollChanged = needsScrollRestoration
             let frontMatterChanged = parent.frontMatterExpanded != latestFrontMatterExpanded
             let restoreAfterSearch: (() -> Void)? = scrollChanged ? { [weak self] in
                 self?.restoreScrollPosition()
@@ -464,6 +467,7 @@ struct MarkdownWebView: PlatformViewRepresentable {
                 return
             }
             latestScrollRequest = parent.scrollRequest
+            latestScrollContentVersion = parent.contentVersion
             let arguments: [String: Any] = [
                 "line": parent.scrollTarget.sourceLine.map { $0 as Any } ?? NSNull(),
                 "progress": parent.scrollTarget.progress,
@@ -483,17 +487,24 @@ struct MarkdownWebView: PlatformViewRepresentable {
             }
         }
 
+        var needsScrollRestoration: Bool {
+            parent.scrollRequest != latestScrollRequest
+                || (parent.scrollRequest != 0
+                    && parent.contentVersion != latestScrollContentVersion)
+        }
+
         private func reloadPage(animated: Bool) {
             guard let webView else { return }
             reloadGeneration += 1
             let generation = reloadGeneration
+            activeContentNavigation = nil
             removeReloadSnapshot()
             let html = parent.html
             let baseURL = parent.baseURL
             guard animated, reloadAnimationsEnabled else {
                 authorizeInternalLoad()
                 beginWebViewLoad()
-                webView.loadHTMLString(
+                activeContentNavigation = webView.loadHTMLString(
                     FrontMatterHTMLState.applying(expanded: parent.frontMatterExpanded, to: html),
                     baseURL: baseURL
                 )
@@ -510,7 +521,7 @@ struct MarkdownWebView: PlatformViewRepresentable {
                 }
                 self.authorizeInternalLoad()
                 self.beginWebViewLoad()
-                webView.loadHTMLString(
+                self.activeContentNavigation = webView.loadHTMLString(
                     FrontMatterHTMLState.applying(expanded: parent.frontMatterExpanded, to: html),
                     baseURL: baseURL
                 )
@@ -960,16 +971,25 @@ struct MarkdownWebView: PlatformViewRepresentable {
         }
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            guard let navigation,
+                  navigation === activeContentNavigation else {
+                return
+            }
             endWebViewLoad()
-            beginWebViewPostProcessing()
             isPageReady = true
+            if parent.contentVersion != latestContentVersion {
+                updateState()
+                return
+            }
+            beginWebViewPostProcessing()
             isSearchInstalled = false
             let generation = searchGeneration
             applyCustomCSS { [weak self] in
                 guard let self,
                       self.isPageReady,
+                      navigation === self.activeContentNavigation,
                       generation == self.searchGeneration else { return }
-                let shouldRestoreScroll = self.parent.scrollRequest != self.latestScrollRequest
+                let shouldRestoreScroll = self.needsScrollRestoration
                 self.updateSearch(command: "search") {
                     if shouldRestoreScroll {
                         self.restoreScrollPosition {
@@ -995,6 +1015,10 @@ struct MarkdownWebView: PlatformViewRepresentable {
             didFail navigation: WKNavigation!,
             withError error: Error
         ) {
+            guard let navigation,
+                  navigation === activeContentNavigation else {
+                return
+            }
             endWebViewLoad()
             endWebViewPostProcessing()
             isPageReady = false
@@ -1007,6 +1031,10 @@ struct MarkdownWebView: PlatformViewRepresentable {
             didFailProvisionalNavigation navigation: WKNavigation!,
             withError error: Error
         ) {
+            guard let navigation,
+                  navigation === activeContentNavigation else {
+                return
+            }
             endWebViewLoad()
             endWebViewPostProcessing()
             isPageReady = false

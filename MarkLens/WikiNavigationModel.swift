@@ -12,6 +12,7 @@ nonisolated struct WikiPage: Equatable, Sendable {
     let filteredHTMLFragmentCount: Int
     let htmlContentAdjustmentReason: HTMLContentAdjustmentReason?
     let displayPath: String
+    let sourceData: Data?
     let estimatedByteCount: Int
 
     nonisolated init(
@@ -24,6 +25,7 @@ nonisolated struct WikiPage: Equatable, Sendable {
         filteredHTMLFragmentCount: Int = 0,
         htmlContentAdjustmentReason: HTMLContentAdjustmentReason? = nil,
         displayPath: String,
+        sourceData: Data? = nil,
         estimatedByteCount: Int
     ) {
         self.id = id
@@ -35,6 +37,7 @@ nonisolated struct WikiPage: Equatable, Sendable {
         self.filteredHTMLFragmentCount = filteredHTMLFragmentCount
         self.htmlContentAdjustmentReason = htmlContentAdjustmentReason
         self.displayPath = displayPath
+        self.sourceData = sourceData
         self.estimatedByteCount = estimatedByteCount
     }
 }
@@ -56,7 +59,7 @@ private struct WikiHistoryEntry {
 
 private struct PendingWikiRefresh {
     let renderingPreferences: RenderingPreferences
-    let onReload: (@MainActor (URL) -> Void)?
+    let onReload: (@MainActor (URL, Bool) -> Void)?
 }
 
 private enum WikiPageLoadPurpose {
@@ -77,6 +80,7 @@ final class WikiNavigationModel: ObservableObject {
     @Published private(set) var canGoBack = false
     @Published private(set) var canGoForward = false
     @Published private(set) var isLoading = false
+    @Published private(set) var isForegroundLoading = false
     @Published private(set) var currentPage: WikiPage?
     @Published var errorDescription: String?
 
@@ -90,6 +94,12 @@ final class WikiNavigationModel: ObservableObject {
     private var pendingRefresh: PendingWikiRefresh?
     private var pageCache: [URL: WikiPage] = [:]
     private let loader: @Sendable (URL, URL, RenderingPreferences) -> WikiPageLoadResult
+    private let refreshLoader: @Sendable (
+        URL,
+        URL,
+        RenderingPreferences,
+        WikiPage
+    ) -> WikiPageLoadResult
 
     private static let historyLimit = 20
     private static let historyByteLimit = 32 * 1_024 * 1_024
@@ -100,8 +110,16 @@ final class WikiNavigationModel: ObservableObject {
     var cachedPageCount: Int { pageCache.count }
     var cachedPageByteCount: Int { cachedHistoryByteCount }
 
-    init(loader: @escaping @Sendable (URL, URL, RenderingPreferences) -> WikiPageLoadResult = WikiPageLoader.load) {
+    init() {
+        self.loader = WikiPageLoader.load
+        self.refreshLoader = WikiPageLoader.refresh
+    }
+
+    init(loader: @escaping @Sendable (URL, URL, RenderingPreferences) -> WikiPageLoadResult) {
         self.loader = loader
+        self.refreshLoader = { url, root, preferences, _ in
+            loader(url, root, preferences)
+        }
     }
 
     deinit {
@@ -123,6 +141,7 @@ final class WikiNavigationModel: ObservableObject {
         pendingRefresh = nil
         errorDescription = nil
         isLoading = true
+        isForegroundLoading = true
 
         let loader = self.loader
         let pageLoadWork = Task.detached(priority: .userInitiated) {
@@ -139,6 +158,7 @@ final class WikiNavigationModel: ObservableObject {
                 return
             }
             self.isLoading = false
+            self.isForegroundLoading = false
             self.activeLoadPurpose = nil
             switch result {
             case .success(let page):
@@ -171,6 +191,7 @@ final class WikiNavigationModel: ObservableObject {
         activeLoadPurpose = .reload
         pendingRefresh = nil
         isLoading = true
+        isForegroundLoading = true
         let loader = self.loader
         let url = currentPage.url
         let work = Task.detached(priority: .userInitiated) {
@@ -181,6 +202,7 @@ final class WikiNavigationModel: ObservableObject {
             let result = await work.value
             guard let self, generation == self.navigationGeneration else { return }
             self.isLoading = false
+            self.isForegroundLoading = false
             self.activeLoadPurpose = nil
             switch result {
             case .success(let page):
@@ -203,7 +225,7 @@ final class WikiNavigationModel: ObservableObject {
 
     func refreshCurrent(
         renderingPreferences: RenderingPreferences,
-        onReload: (@MainActor (URL) -> Void)? = nil
+        onReload: (@MainActor (URL, Bool) -> Void)? = nil
     ) {
         guard let currentPage,
               let wikiRootURL else {
@@ -229,8 +251,9 @@ final class WikiNavigationModel: ObservableObject {
         url: URL,
         wikiRootURL: URL,
         renderingPreferences: RenderingPreferences,
-        onReload: (@MainActor (URL) -> Void)?
+        onReload: (@MainActor (URL, Bool) -> Void)?
     ) {
+        guard let previousPage = currentPage else { return }
         navigationGeneration += 1
         let generation = navigationGeneration
         loadTask?.cancel()
@@ -238,25 +261,28 @@ final class WikiNavigationModel: ObservableObject {
         activeLoadPurpose = .refresh
         errorDescription = nil
         isLoading = true
-        let loader = self.loader
+        isForegroundLoading = false
+        let refreshLoader = self.refreshLoader
         let work = Task.detached(priority: .userInitiated) {
-            loader(url, wikiRootURL, renderingPreferences)
+            refreshLoader(url, wikiRootURL, renderingPreferences, previousPage)
         }
         pageLoadWork = work
         loadTask = Task { [weak self] in
             let result = await work.value
             guard let self, generation == self.navigationGeneration else { return }
             self.isLoading = false
+            self.isForegroundLoading = false
             self.activeLoadPurpose = nil
             switch result {
             case .success(let page):
+                let contentChanged = page.id != self.currentPage?.id
                 self.current = .page(page.url)
                 self.currentPage = page
                 self.pageCache[page.url] = page
                 self.trimHistory()
                 self.prunePageCache()
                 self.errorDescription = nil
-                onReload?(page.url)
+                onReload?(page.url, contentChanged)
             case .failure(let description):
                 self.errorDescription = description
             case .cancelled:
@@ -323,6 +349,7 @@ final class WikiNavigationModel: ObservableObject {
         activeLoadPurpose = nil
         pendingRefresh = nil
         isLoading = false
+        isForegroundLoading = false
     }
 
     private func startPendingRefreshIfNeeded() {
@@ -404,8 +431,51 @@ enum WikiPageLoader {
     ) -> WikiPageLoadResult {
         guard isCurrentTaskCancelled() == false else { return .cancelled }
         do {
+            let sourceData = try Data(contentsOf: url)
+            return render(
+                sourceData,
+                url: url,
+                wikiRoot: wikiRoot,
+                renderingPreferences: renderingPreferences
+            )
+        } catch {
+            return .failure("Unable to load \(url.lastPathComponent): \(error.localizedDescription)")
+        }
+    }
+
+    nonisolated static func refresh(
+        url: URL,
+        wikiRoot: URL,
+        renderingPreferences: RenderingPreferences,
+        currentPage: WikiPage
+    ) -> WikiPageLoadResult {
+        guard isCurrentTaskCancelled() == false else { return .cancelled }
+        do {
+            let sourceData = try Data(contentsOf: url)
+            guard sourceData != currentPage.sourceData else {
+                return .success(currentPage)
+            }
+            return render(
+                sourceData,
+                url: url,
+                wikiRoot: wikiRoot,
+                renderingPreferences: renderingPreferences
+            )
+        } catch {
+            return .failure("Unable to load \(url.lastPathComponent): \(error.localizedDescription)")
+        }
+    }
+
+    nonisolated private static func render(
+        _ sourceData: Data,
+        url: URL,
+        wikiRoot: URL,
+        renderingPreferences: RenderingPreferences
+    ) -> WikiPageLoadResult {
+        guard isCurrentTaskCancelled() == false else { return .cancelled }
+        do {
             let context = renderingPreferences.pipelineContext(title: url.lastPathComponent)
-            let document = try pipeline.renderHTML(from: .file(url), context: context)
+            let document = try pipeline.renderHTML(from: .data(sourceData), context: context)
             guard isCurrentTaskCancelled() == false else { return .cancelled }
             return .success(WikiPage(
                 url: url,
@@ -418,7 +488,8 @@ enum WikiPageLoader {
                     ? renderingPreferences.htmlContentAdjustmentReason
                     : nil,
                 displayPath: WikiLinkResolver().relativePath(of: url, in: wikiRoot),
-                estimatedByteCount: document.html.utf8.count
+                sourceData: sourceData,
+                estimatedByteCount: document.html.utf8.count + sourceData.count
             ))
         } catch {
             return .failure("Unable to load \(url.lastPathComponent): \(error.localizedDescription)")

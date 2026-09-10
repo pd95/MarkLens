@@ -139,7 +139,7 @@ final class WikiPageFileMonitorIntegrationTests: XCTestCase {
                 reconnectDelay: .milliseconds(50)
             )
         ) {
-            navigation.refreshCurrent(renderingPreferences: .secureDefaults) { _ in
+            navigation.refreshCurrent(renderingPreferences: .secureDefaults) { _, _ in
                 reloaded.fulfill()
             }
         }
@@ -183,10 +183,10 @@ final class ExternalDocumentReloadCoordinatorTests: XCTestCase {
 
     func testRetriesChangeAfterDocumentBecomesAvailable() {
         let document = ManagedDocumentStub()
-        var resolvedDocument: ManagedDocumentStub?
+        let resolution = ResolvedDocumentHolder()
         let coordinator = ExternalDocumentReloadCoordinator(
             fileURL: URL(fileURLWithPath: "/tmp/document.md"),
-            resolver: { _ in resolvedDocument }
+            resolver: { _ in resolution.document }
         )
 
         guard case .unavailable = coordinator.handleChange(isEditing: false) else {
@@ -194,7 +194,7 @@ final class ExternalDocumentReloadCoordinatorTests: XCTestCase {
         }
         XCTAssertTrue(coordinator.hasDeferredChange)
 
-        resolvedDocument = document
+        resolution.document = document
         let result = coordinator.resumeDeferredChange(isEditing: false)
 
         guard let result else {
@@ -361,6 +361,11 @@ private final class ManagedDocumentStub: ManagedDocumentReloading {
             throw reloadError
         }
     }
+}
+
+@MainActor
+private final class ResolvedDocumentHolder {
+    var document: ManagedDocumentStub?
 }
 
 private struct MonitorFixture {

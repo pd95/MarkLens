@@ -255,6 +255,115 @@ final class WikiNavigationModelTests: XCTestCase {
         XCTAssertTrue(model.canGoForward)
     }
 
+    func testFileRefreshReusesCachedPageUntilSourceChanges() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("wiki-cache-\(UUID().uuidString)", isDirectory: true)
+        let pageURL = root.appendingPathComponent("page.md")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try "# Initial".write(to: pageURL, atomically: true, encoding: .utf8)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let model = WikiNavigationModel()
+        model.navigate(to: pageURL, wikiRoot: root)
+        await waitForLoad(model)
+        let initialID = model.currentPage?.id
+        var contentChanged: Bool?
+
+        model.refreshCurrent(renderingPreferences: .secureDefaults) { _, changed in
+            contentChanged = changed
+        }
+        XCTAssertFalse(model.isForegroundLoading)
+        await waitForLoad(model)
+
+        XCTAssertEqual(model.currentPage?.id, initialID)
+        XCTAssertEqual(contentChanged, false)
+
+        try "# Updated".write(to: pageURL, atomically: true, encoding: .utf8)
+        model.refreshCurrent(renderingPreferences: .secureDefaults) { _, changed in
+            contentChanged = changed
+        }
+        await waitForLoad(model)
+
+        XCTAssertNotEqual(model.currentPage?.id, initialID)
+        XCTAssertEqual(contentChanged, true)
+        XCTAssertTrue(model.currentPage?.html.contains("Updated") == true)
+    }
+
+    func testSlowRefreshRestoresLatestUserScrollPosition() async {
+        let root = URL(fileURLWithPath: "/wiki")
+        let pageURL = root.appendingPathComponent("page.md")
+        let refreshStarted = LockedValue(false)
+        let shouldDelay = LockedValue(false)
+        let model = WikiNavigationModel { url, root, _ in
+            if shouldDelay.get() {
+                refreshStarted.set(true)
+                Thread.sleep(forTimeInterval: 0.05)
+            }
+            return .success(Self.page(url: url, root: root))
+        }
+
+        model.navigate(to: pageURL, wikiRoot: root)
+        await waitForLoad(model)
+
+        let positionAtStart = Self.scrollPosition(line: 12, progress: 0.2)
+        let positionAfterUserScroll = Self.scrollPosition(line: 44, progress: 0.7)
+        let restoration = WikiRefreshScrollRestoration.live
+        let currentPosition = LockedValue(positionAtStart)
+        let restoredPosition = LockedValue<DocumentScrollPosition?>(nil)
+        shouldDelay.set(true)
+
+        model.refreshCurrent(renderingPreferences: .secureDefaults) { _, changed in
+            guard changed else { return }
+            restoredPosition.set(restoration.resolvedPosition(
+                currentPosition: currentPosition.get(),
+                confirmedRequest: 0
+            ))
+        }
+        await waitUntil { refreshStarted.get() }
+        currentPosition.set(positionAfterUserScroll)
+        await waitForLoad(model)
+
+        XCTAssertEqual(restoredPosition.get(), positionAfterUserScroll)
+    }
+
+    func testHistoryRefreshKeepsRequestedPositionUntilWebViewConfirmsIt() async {
+        let root = URL(fileURLWithPath: "/wiki")
+        let pageURL = root.appendingPathComponent("page.md")
+        let refreshStarted = LockedValue(false)
+        let shouldDelay = LockedValue(false)
+        let model = WikiNavigationModel { url, root, _ in
+            if shouldDelay.get() {
+                refreshStarted.set(true)
+                Thread.sleep(forTimeInterval: 0.05)
+            }
+            return .success(Self.page(url: url, root: root))
+        }
+
+        model.navigate(to: pageURL, wikiRoot: root)
+        await waitForLoad(model)
+
+        let historyPosition = Self.scrollPosition(line: 18, progress: 0.25)
+        let leavingPagePosition = Self.scrollPosition(line: 80, progress: 0.9)
+        let restoration = WikiRefreshScrollRestoration.requested(
+            position: historyPosition,
+            request: 7
+        )
+        let restoredPosition = LockedValue<DocumentScrollPosition?>(nil)
+        shouldDelay.set(true)
+
+        model.refreshCurrent(renderingPreferences: .secureDefaults) { _, changed in
+            guard changed else { return }
+            restoredPosition.set(restoration.resolvedPosition(
+                currentPosition: leavingPagePosition,
+                confirmedRequest: 6
+            ))
+        }
+        await waitUntil { refreshStarted.get() }
+        await waitForLoad(model)
+
+        XCTAssertEqual(restoredPosition.get(), historyPosition)
+    }
+
     func testRefreshFailureKeepsCurrentPageAndSuccessfulRetryClearsError() async {
         let root = URL(fileURLWithPath: "/wiki")
         let pageURL = root.appendingPathComponent("page.md")

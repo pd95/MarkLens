@@ -63,6 +63,31 @@ final class ScrollPositionScriptTests: XCTestCase {
         XCTAssertEqual((position["line"] as? NSNumber)?.intValue, 1)
     }
 
+    func testReportsActualPositionWithActiveRestorationRequest() throws {
+        let context = try makeContext(anchors: [
+            anchor(tag: "H2", text: "Destination", line: 40, top: 600)
+        ])
+
+        context.evaluateScript("""
+        window.MarkLensScroll.restore({
+            request: 17,
+            line: 40,
+            progress: 0.3,
+            anchor: null,
+            occurrence: null,
+            previousAnchor: null,
+            nextAnchor: null,
+            offset: 20
+        });
+        """)
+        let position = try lastReportedPosition(in: context)
+
+        XCTAssertEqual((position["restorationRequest"] as? NSNumber)?.intValue, 17)
+        XCTAssertEqual((position["line"] as? NSNumber)?.intValue, 40)
+        let progress = try XCTUnwrap((position["progress"] as? NSNumber)?.doubleValue)
+        XCTAssertEqual(progress, 0.305, accuracy: 0.001)
+    }
+
     func testSelectionStartLineUsesNearestSourceAncestor() throws {
         let context = try makeContext(anchors: [])
         context.evaluateScript("""
@@ -203,7 +228,10 @@ final class ScrollPositionScriptTests: XCTestCase {
             top: spec.top,
             parentElement: null,
             getBoundingClientRect() {
-                return { top: this.top, bottom: this.top + spec.height };
+                return {
+                    top: this.top - scrollY,
+                    bottom: this.top - scrollY + spec.height
+                };
             }
         }));
         var document = {

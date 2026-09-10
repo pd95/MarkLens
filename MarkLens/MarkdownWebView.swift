@@ -48,6 +48,7 @@ struct MarkdownWebView: PlatformViewRepresentable {
     @Binding var scrollPosition: DocumentScrollPosition
     var scrollTarget: DocumentScrollPosition
     var scrollRequest: Int
+    @Binding var confirmedScrollRequest: Int
     private var baseURL: URL? {
         documentURL
     }
@@ -78,7 +79,8 @@ struct MarkdownWebView: PlatformViewRepresentable {
         sourceEditPositionAction: @escaping (UUID, Int?) -> Void = { _, _ in },
         scrollPosition: Binding<DocumentScrollPosition> = .constant(.top),
         scrollTarget: DocumentScrollPosition = .top,
-        scrollRequest: Int = 0
+        scrollRequest: Int = 0,
+        confirmedScrollRequest: Binding<Int> = .constant(0)
     ) {
         self.html = html
         self.contentIdentity = contentIdentity
@@ -106,6 +108,7 @@ struct MarkdownWebView: PlatformViewRepresentable {
         self._scrollPosition = scrollPosition
         self.scrollTarget = scrollTarget
         self.scrollRequest = scrollRequest
+        self._confirmedScrollRequest = confirmedScrollRequest
     }
 
     func makeCoordinator() -> Coordinator {
@@ -433,8 +436,15 @@ struct MarkdownWebView: PlatformViewRepresentable {
                 nextAnchorIdentity: nextAnchorIdentity,
                 viewportOffset: min(max(viewportOffset, -100_000), 100_000)
             )
+            let restorationRequest = Self.optionalIntValue(value["restorationRequest"])
             Task { @MainActor in
                 self.parent.scrollPosition = position
+                if let restorationRequest {
+                    self.parent.confirmedScrollRequest = max(
+                        self.parent.confirmedScrollRequest,
+                        restorationRequest
+                    )
+                }
             }
         }
 
@@ -469,6 +479,7 @@ struct MarkdownWebView: PlatformViewRepresentable {
             latestScrollRequest = parent.scrollRequest
             latestScrollContentVersion = parent.contentVersion
             let arguments: [String: Any] = [
+                "request": parent.scrollRequest,
                 "line": parent.scrollTarget.sourceLine.map { $0 as Any } ?? NSNull(),
                 "progress": parent.scrollTarget.progress,
                 "anchor": parent.scrollTarget.anchorIdentity.map { $0 as Any } ?? NSNull(),
@@ -1080,6 +1091,8 @@ struct MarkdownWebView: PlatformViewRepresentable {
                 anchorByElement.set(anchor.element, anchor);
             });
             const visibleAnchors = new Set();
+            let activeRestoration = null;
+            let restorationTimeout = null;
             const progress = () => {
                 const maximum = Math.max(0, document.documentElement.scrollHeight - innerHeight);
                 return maximum === 0 ? 0 : scrollY / maximum;
@@ -1127,7 +1140,8 @@ struct MarkdownWebView: PlatformViewRepresentable {
                     occurrence,
                     previousAnchor,
                     nextAnchor,
-                    offset
+                    offset,
+                    restorationRequest: activeRestoration?.request ?? null
                 });
             };
             let scheduled = false;
@@ -1228,8 +1242,6 @@ struct MarkdownWebView: PlatformViewRepresentable {
                 });
                 return best.element;
             };
-            let activeRestoration = null;
-            let restorationTimeout = null;
             const cancelRestoration = () => {
                 activeRestoration = null;
                 clearTimeout(restorationTimeout);

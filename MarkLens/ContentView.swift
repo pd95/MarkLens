@@ -12,7 +12,7 @@ import MarkdownPipeline
 import AppKit
 #endif
 
-nonisolated struct DocumentScrollPosition: Equatable {
+nonisolated struct DocumentScrollPosition: Equatable, Sendable {
     var sourceLine: Int?
     var progress: Double
     var anchorIdentity: String? = nil
@@ -22,6 +22,23 @@ nonisolated struct DocumentScrollPosition: Equatable {
     var viewportOffset: Double = 0
 
     static let top = DocumentScrollPosition(sourceLine: 1, progress: 0)
+}
+
+nonisolated enum WikiRefreshScrollRestoration {
+    case live
+    case requested(position: DocumentScrollPosition, request: Int)
+
+    func resolvedPosition(
+        currentPosition: DocumentScrollPosition,
+        confirmedRequest: Int
+    ) -> DocumentScrollPosition {
+        switch self {
+        case .live:
+            return currentPosition
+        case .requested(let position, let request):
+            return confirmedRequest >= request ? currentPosition : position
+        }
+    }
 }
 
 private enum FrontMatterPageKey: Hashable {
@@ -88,6 +105,7 @@ struct ContentView: View {
     @State private var previewScrollTarget = DocumentScrollPosition.top
     @State private var sourceScrollTarget = DocumentScrollPosition.top
     @State private var previewScrollRequest = 0
+    @State private var previewConfirmedScrollRequest = 0
     @State private var sourceScrollRequest = 0
     @State private var sourceSelectionLine: Int?
     @State private var expandedFrontMatterPages: Set<FrontMatterPageKey> = []
@@ -143,7 +161,8 @@ struct ContentView: View {
                 sourceEditPositionAction: completeBeginRawEditing,
                 scrollPosition: $previewScrollPosition,
                 scrollTarget: previewScrollTarget,
-                scrollRequest: previewScrollRequest
+                scrollRequest: previewScrollRequest,
+                confirmedScrollRequest: $previewConfirmedScrollRequest
             )
             .allowsHitTesting(!isRawEditing && !isWikiNavigationLoading)
             .zIndex(0)
@@ -805,10 +824,7 @@ struct ContentView: View {
             externalReloadErrorDescription = nil
             if let pageURL = wikiNavigation.currentPage?.url {
                 if let fileURL, sameMonitoredFile(pageURL, fileURL) {
-                    refreshDisplayedWikiPage(
-                        at: pageURL,
-                        restoringScrollPosition: preservedPosition
-                    )
+                    refreshDisplayedWikiPage(at: pageURL, scrollRestoration: .live)
                 }
                 return
             }
@@ -879,30 +895,38 @@ struct ContentView: View {
                   sameMonitoredFile(currentURL, monitoredURL) else {
                 return
             }
-            refreshDisplayedWikiPage(
-                at: monitoredURL,
-                restoringScrollPosition: previewScrollPosition
-            )
+            refreshDisplayedWikiPage(at: monitoredURL, scrollRestoration: .live)
         }
     }
 
     private func refreshDisplayedWikiPage(
         at expectedURL: URL,
-        restoringScrollPosition: DocumentScrollPosition
+        scrollRestoration: WikiRefreshScrollRestoration
     ) {
-        wikiNavigation.refreshCurrent(renderingPreferences: renderingPreferences) { reloadedURL in
+        wikiNavigation.refreshCurrent(renderingPreferences: renderingPreferences) {
+            reloadedURL,
+            contentChanged in
             guard sameMonitoredFile(reloadedURL, expectedURL),
                   let currentURL = wikiNavigation.currentPage?.url,
-                  sameMonitoredFile(currentURL, expectedURL) else {
+                  sameMonitoredFile(currentURL, expectedURL),
+                  contentChanged else {
                 return
             }
-            restorePreviewScroll(to: restoringScrollPosition)
+            // The page remains interactive while the refresh is rendered. Use
+            // the position current at completion so a user's intervening scroll
+            // is not replaced by the position captured when refresh began.
+            restorePreviewScroll(to: scrollRestoration.resolvedPosition(
+                currentPosition: previewScrollPosition,
+                confirmedRequest: previewConfirmedScrollRequest
+            ))
         }
     }
 
-    private func restorePreviewScroll(to position: DocumentScrollPosition) {
+    @discardableResult
+    private func restorePreviewScroll(to position: DocumentScrollPosition) -> Int {
         previewScrollTarget = position
         previewScrollRequest += 1
+        return previewScrollRequest
     }
 
     private func sameMonitoredFile(_ firstURL: URL, _ secondURL: URL) -> Bool {
@@ -1001,9 +1025,9 @@ struct ContentView: View {
 
     private var isWikiNavigationLoading: Bool {
 #if os(macOS)
-        wikiNavigation.isLoading || isResolvingWikiLink
+        wikiNavigation.isForegroundLoading || isResolvingWikiLink
 #else
-        wikiNavigation.isLoading
+        wikiNavigation.isForegroundLoading
 #endif
     }
 
@@ -1337,10 +1361,13 @@ struct ContentView: View {
             return
         }
         if case .page(let pageURL) = navigation.location {
-            restorePreviewScroll(to: navigation.scrollPosition)
+            let request = restorePreviewScroll(to: navigation.scrollPosition)
             refreshDisplayedWikiPage(
                 at: pageURL,
-                restoringScrollPosition: navigation.scrollPosition
+                scrollRestoration: .requested(
+                    position: navigation.scrollPosition,
+                    request: request
+                )
             )
         } else {
             restorePreviewScroll(to: navigation.scrollPosition)
@@ -1355,10 +1382,13 @@ struct ContentView: View {
             return
         }
         if case .page(let pageURL) = navigation.location {
-            restorePreviewScroll(to: navigation.scrollPosition)
+            let request = restorePreviewScroll(to: navigation.scrollPosition)
             refreshDisplayedWikiPage(
                 at: pageURL,
-                restoringScrollPosition: navigation.scrollPosition
+                scrollRestoration: .requested(
+                    position: navigation.scrollPosition,
+                    request: request
+                )
             )
         } else {
             restorePreviewScroll(to: navigation.scrollPosition)

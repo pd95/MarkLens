@@ -223,6 +223,10 @@ struct ContentView: View {
     }
 
     var body: some View {
+        presentedContent
+    }
+
+    private var contentWithToolbar: some View {
         ZStack {
             markdownPreview
             .allowsHitTesting(!isRawEditing && !isWikiNavigationLoading)
@@ -477,6 +481,10 @@ struct ContentView: View {
                 }
             }
         }
+    }
+
+    private var lifecycleContent: some View {
+        contentWithToolbar
         .previewSearchable(
             enabled: !isRawEditing,
             text: $previewFindText,
@@ -552,6 +560,10 @@ struct ContentView: View {
 #endif
             wikiNavigation.cancelPendingNavigation()
         }
+    }
+
+    private var presentedContent: some View {
+        lifecycleContent
         .alert(localAccessAlertTitle, isPresented: localAccessAlertPresented) {
 #if os(macOS)
             Button("Choose \(localAccessFolderName) Folder") {

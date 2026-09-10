@@ -224,50 +224,7 @@ struct ContentView: View {
 
     var body: some View {
         ZStack {
-            MarkdownWebView(
-                html: displayedHTML,
-                contentIdentity: displayedPageIdentity,
-                resources: displayedResources,
-                customCSS: customCSS,
-                documentURL: displayedURL,
-                openDocument: openLocalDocument,
-                openWikiLink: openWikiLink,
-                requestLocalDocumentAccess: { url, errorDescription in
-#if os(macOS)
-                    handleLocalDocumentOpenFailure(url, errorDescription: errorDescription)
-#else
-                    localDocumentError = errorDescription
-#endif
-                },
-                localImagePermissionDenied: { url in
-#if os(macOS)
-                    handleLocalImagePermissionFailure(url)
-#endif
-                },
-                reloadRequest: localDocumentAccess.accessRevision,
-                outputRequest: $outputRequest,
-                activeOutputOperationID: $activeOutputOperationID,
-                outputFailed: { title, description in
-                    outputErrorTitle = title
-                    outputErrorDescription = description
-                },
-                findMatchCount: $previewFindMatchCount,
-                findCurrentIndex: $previewFindCurrentIndex,
-                findTerm: isRawEditing ? "" : previewFindText,
-                findRequest: previewFindRequest,
-                findBackwards: previewFindBackwards,
-                findAnchorRequest: previewFindAnchorRequest,
-                findSelectionAction: { selection in
-                    previewFindText = selection
-                },
-                frontMatterExpanded: frontMatterExpandedBinding,
-                sourceEditPositionRequest: sourceEditPositionRequest,
-                sourceEditPositionAction: completeBeginRawEditing,
-                scrollPosition: $previewScrollPosition,
-                scrollTarget: previewScrollTarget,
-                scrollRequest: previewScrollRequest,
-                confirmedScrollRequest: $previewConfirmedScrollRequest
-            )
+            markdownPreview
             .allowsHitTesting(!isRawEditing && !isWikiNavigationLoading)
             .zIndex(0)
 
@@ -662,6 +619,53 @@ struct ContentView: View {
             }
         })
 #endif
+    }
+
+    private var markdownPreview: some View {
+        MarkdownWebView(
+            html: displayedHTML,
+            contentIdentity: displayedPageIdentity,
+            resources: displayedResources,
+            customCSS: customCSS,
+            documentURL: displayedURL,
+            openDocument: openLocalDocument,
+            openWikiLink: openWikiLink,
+            requestLocalDocumentAccess: { url, errorDescription in
+#if os(macOS)
+                handleLocalDocumentOpenFailure(url, errorDescription: errorDescription)
+#else
+                localDocumentError = errorDescription
+#endif
+            },
+            localImagePermissionDenied: { url in
+#if os(macOS)
+                handleLocalImagePermissionFailure(url)
+#endif
+            },
+            reloadRequest: localDocumentAccess.accessRevision,
+            outputRequest: $outputRequest,
+            activeOutputOperationID: $activeOutputOperationID,
+            outputFailed: { title, description in
+                outputErrorTitle = title
+                outputErrorDescription = description
+            },
+            findMatchCount: $previewFindMatchCount,
+            findCurrentIndex: $previewFindCurrentIndex,
+            findTerm: isRawEditing ? "" : previewFindText,
+            findRequest: previewFindRequest,
+            findBackwards: previewFindBackwards,
+            findAnchorRequest: previewFindAnchorRequest,
+            findSelectionAction: { selection in
+                previewFindText = selection
+            },
+            frontMatterExpanded: frontMatterExpandedBinding,
+            sourceEditPositionRequest: sourceEditPositionRequest,
+            sourceEditPositionAction: completeBeginRawEditing,
+            scrollPosition: $previewScrollPosition,
+            scrollTarget: previewScrollTarget,
+            scrollRequest: previewScrollRequest,
+            confirmedScrollRequest: $previewConfirmedScrollRequest
+        )
     }
 
     private func rawString() -> String {

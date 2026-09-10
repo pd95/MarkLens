@@ -117,6 +117,49 @@ final class ExternalFileMonitorTests: XCTestCase {
 }
 
 @MainActor
+final class WikiPageFileMonitorIntegrationTests: XCTestCase {
+    func testFileSignalReloadsCurrentWikiPageThroughLoader() async throws {
+        let directoryURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let pageURL = directoryURL.appendingPathComponent("page.md")
+        try FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true)
+        try "# Before".write(to: pageURL, atomically: true, encoding: .utf8)
+        defer { try? FileManager.default.removeItem(at: directoryURL) }
+
+        let navigation = WikiNavigationModel()
+        navigation.navigate(to: pageURL, wikiRoot: directoryURL)
+        await waitForLoad(navigation)
+
+        let reloaded = expectation(description: "wiki page reloaded")
+        let monitor = ExternalFileMonitor(
+            fileURL: pageURL,
+            timing: ExternalFileMonitor.Timing(
+                quietPeriod: .milliseconds(100),
+                maximumDelay: .milliseconds(350),
+                reconnectDelay: .milliseconds(50)
+            )
+        ) {
+            navigation.refreshCurrent(renderingPreferences: .secureDefaults) { _ in
+                reloaded.fulfill()
+            }
+        }
+
+        try "# After".write(to: pageURL, atomically: true, encoding: .utf8)
+
+        await fulfillment(of: [reloaded], timeout: 2)
+        XCTAssertTrue(navigation.currentPage?.html.contains("After") == true)
+        monitor.stop()
+    }
+
+    private func waitForLoad(_ model: WikiNavigationModel) async {
+        for _ in 0..<100 where model.isLoading {
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+        XCTAssertFalse(model.isLoading)
+    }
+}
+
+@MainActor
 final class ExternalDocumentReloadCoordinatorTests: XCTestCase {
     func testReloadsEverySignalForCleanDocument() {
         let document = ManagedDocumentStub()

@@ -12,7 +12,7 @@ import MarkdownPipeline
 import AppKit
 #endif
 
-struct DocumentScrollPosition: Equatable {
+nonisolated struct DocumentScrollPosition: Equatable {
     var sourceLine: Int?
     var progress: Double
     var anchorIdentity: String? = nil
@@ -54,6 +54,7 @@ struct ContentView: View {
 #if os(macOS)
     @State private var pendingLocalAccessRequest: LocalAccessRequest?
     @State private var externalFileMonitor: ExternalFileMonitor?
+    @State private var wikiFileMonitor: ExternalFileMonitor?
     @State private var externalDocumentReloadCoordinator: ExternalDocumentReloadCoordinator?
     @State private var externalReloadRetryTask: Task<Void, Never>?
     @State private var externalReloadRetryAttempt = 0
@@ -434,6 +435,7 @@ struct ContentView: View {
         }
         .onAppear {
             startExternalFileMonitor()
+            restartWikiFileMonitor()
         }
         .onChange(of: fileURL) {
             externalFileMonitor?.stop()
@@ -442,6 +444,10 @@ struct ContentView: View {
             cancelExternalReloadRetry()
             externalReloadErrorDescription = nil
             startExternalFileMonitor()
+            restartWikiFileMonitor()
+        }
+        .onChange(of: wikiNavigation.currentPage?.url) {
+            restartWikiFileMonitor()
         }
         .onChange(of: scenePhase) {
             guard scenePhase == .active else {
@@ -457,6 +463,8 @@ struct ContentView: View {
 #if os(macOS)
             externalFileMonitor?.stop()
             externalFileMonitor = nil
+            wikiFileMonitor?.stop()
+            wikiFileMonitor = nil
             externalDocumentReloadCoordinator = nil
             cancelExternalReloadRetry()
             externalReloadErrorDescription = nil
@@ -795,6 +803,15 @@ struct ContentView: View {
         case .reloaded:
             cancelExternalReloadRetry()
             externalReloadErrorDescription = nil
+            if let pageURL = wikiNavigation.currentPage?.url {
+                if let fileURL, sameMonitoredFile(pageURL, fileURL) {
+                    refreshDisplayedWikiPage(
+                        at: pageURL,
+                        restoringScrollPosition: preservedPosition
+                    )
+                }
+                return
+            }
             previewScrollTarget = preservedPosition
             Task { @MainActor in
                 await Task.yield()
@@ -845,6 +862,51 @@ struct ContentView: View {
         externalReloadRetryTask?.cancel()
         externalReloadRetryTask = nil
         externalReloadRetryAttempt = 0
+    }
+
+    private func restartWikiFileMonitor() {
+        wikiFileMonitor?.stop()
+        wikiFileMonitor = nil
+
+        guard let pageURL = wikiNavigation.currentPage?.url else { return }
+        if let fileURL, sameMonitoredFile(pageURL, fileURL) {
+            return
+        }
+
+        let monitoredURL = pageURL.standardizedFileURL
+        wikiFileMonitor = ExternalFileMonitor(fileURL: monitoredURL) {
+            guard let currentURL = wikiNavigation.currentPage?.url,
+                  sameMonitoredFile(currentURL, monitoredURL) else {
+                return
+            }
+            refreshDisplayedWikiPage(
+                at: monitoredURL,
+                restoringScrollPosition: previewScrollPosition
+            )
+        }
+    }
+
+    private func refreshDisplayedWikiPage(
+        at expectedURL: URL,
+        restoringScrollPosition: DocumentScrollPosition
+    ) {
+        wikiNavigation.refreshCurrent(renderingPreferences: renderingPreferences) { reloadedURL in
+            guard sameMonitoredFile(reloadedURL, expectedURL),
+                  let currentURL = wikiNavigation.currentPage?.url,
+                  sameMonitoredFile(currentURL, expectedURL) else {
+                return
+            }
+            restorePreviewScroll(to: restoringScrollPosition)
+        }
+    }
+
+    private func restorePreviewScroll(to position: DocumentScrollPosition) {
+        previewScrollTarget = position
+        previewScrollRequest += 1
+    }
+
+    private func sameMonitoredFile(_ firstURL: URL, _ secondURL: URL) -> Bool {
+        firstURL.standardizedFileURL == secondURL.standardizedFileURL
     }
 #endif
 
@@ -1252,7 +1314,8 @@ struct ContentView: View {
         wikiNavigation.navigate(
             to: url,
             wikiRoot: wikiRoot,
-            renderingPreferences: renderingPreferences
+            renderingPreferences: renderingPreferences,
+            leavingScrollPosition: previewScrollPosition
         )
     }
 
@@ -1268,12 +1331,38 @@ struct ContentView: View {
 
     private func navigateWikiBack() {
         cancelWikiResolution()
-        wikiNavigation.goBack()
+        guard let navigation = wikiNavigation.goBack(
+            leavingScrollPosition: previewScrollPosition
+        ) else {
+            return
+        }
+        if case .page(let pageURL) = navigation.location {
+            restorePreviewScroll(to: navigation.scrollPosition)
+            refreshDisplayedWikiPage(
+                at: pageURL,
+                restoringScrollPosition: navigation.scrollPosition
+            )
+        } else {
+            restorePreviewScroll(to: navigation.scrollPosition)
+        }
     }
 
     private func navigateWikiForward() {
         cancelWikiResolution()
-        wikiNavigation.goForward()
+        guard let navigation = wikiNavigation.goForward(
+            leavingScrollPosition: previewScrollPosition
+        ) else {
+            return
+        }
+        if case .page(let pageURL) = navigation.location {
+            restorePreviewScroll(to: navigation.scrollPosition)
+            refreshDisplayedWikiPage(
+                at: pageURL,
+                restoringScrollPosition: navigation.scrollPosition
+            )
+        } else {
+            restorePreviewScroll(to: navigation.scrollPosition)
+        }
     }
 
     private func cancelWikiResolution() {

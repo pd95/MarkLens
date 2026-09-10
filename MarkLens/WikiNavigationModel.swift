@@ -44,6 +44,27 @@ enum WikiLocation: Equatable, Sendable {
     case page(URL)
 }
 
+struct WikiHistoryNavigation: Equatable {
+    let location: WikiLocation
+    let scrollPosition: DocumentScrollPosition
+}
+
+private struct WikiHistoryEntry {
+    let location: WikiLocation
+    let scrollPosition: DocumentScrollPosition
+}
+
+private struct PendingWikiRefresh {
+    let renderingPreferences: RenderingPreferences
+    let onReload: (@MainActor (URL) -> Void)?
+}
+
+private enum WikiPageLoadPurpose {
+    case navigation
+    case reload
+    case refresh
+}
+
 enum WikiPageLoadResult: Sendable {
     case success(WikiPage)
     case failure(String)
@@ -60,11 +81,13 @@ final class WikiNavigationModel: ObservableObject {
     @Published var errorDescription: String?
 
     private(set) var wikiRootURL: URL?
-    private var backStack: [WikiLocation] = []
-    private var forwardStack: [WikiLocation] = []
+    private var backStack: [WikiHistoryEntry] = []
+    private var forwardStack: [WikiHistoryEntry] = []
     private var navigationGeneration = 0
     private var loadTask: Task<Void, Never>?
     private var pageLoadWork: Task<WikiPageLoadResult, Never>?
+    private var activeLoadPurpose: WikiPageLoadPurpose?
+    private var pendingRefresh: PendingWikiRefresh?
     private var pageCache: [URL: WikiPage] = [:]
     private let loader: @Sendable (URL, URL, RenderingPreferences) -> WikiPageLoadResult
 
@@ -89,12 +112,15 @@ final class WikiNavigationModel: ObservableObject {
     func navigate(
         to url: URL,
         wikiRoot: URL,
-        renderingPreferences: RenderingPreferences = .secureDefaults
+        renderingPreferences: RenderingPreferences = .secureDefaults,
+        leavingScrollPosition: DocumentScrollPosition = .top
     ) {
         navigationGeneration += 1
         let generation = navigationGeneration
         loadTask?.cancel()
         pageLoadWork?.cancel()
+        activeLoadPurpose = .navigation
+        pendingRefresh = nil
         errorDescription = nil
         isLoading = true
 
@@ -113,9 +139,13 @@ final class WikiNavigationModel: ObservableObject {
                 return
             }
             self.isLoading = false
+            self.activeLoadPurpose = nil
             switch result {
             case .success(let page):
-                self.backStack.append(self.current)
+                self.backStack.append(WikiHistoryEntry(
+                    location: self.current,
+                    scrollPosition: leavingScrollPosition
+                ))
                 self.current = .page(page.url)
                 self.currentPage = page
                 self.forwardStack.removeAll()
@@ -138,6 +168,8 @@ final class WikiNavigationModel: ObservableObject {
         let generation = navigationGeneration
         loadTask?.cancel()
         pageLoadWork?.cancel()
+        activeLoadPurpose = .reload
+        pendingRefresh = nil
         isLoading = true
         let loader = self.loader
         let url = currentPage.url
@@ -149,11 +181,14 @@ final class WikiNavigationModel: ObservableObject {
             let result = await work.value
             guard let self, generation == self.navigationGeneration else { return }
             self.isLoading = false
+            self.activeLoadPurpose = nil
             switch result {
             case .success(let page):
+                let rootEntry = self.backStack.first { $0.location == .root }
+                    ?? WikiHistoryEntry(location: .root, scrollPosition: .top)
                 self.current = .page(page.url)
                 self.currentPage = page
-                self.backStack = [.root]
+                self.backStack = [rootEntry]
                 self.forwardStack = []
                 self.pageCache = [page.url: page]
                 self.updateHistoryState()
@@ -162,29 +197,117 @@ final class WikiNavigationModel: ObservableObject {
             case .cancelled:
                 break
             }
+            self.startPendingRefreshIfNeeded()
         }
     }
 
-    func goBack() {
-        guard let destination = backStack.popLast() else { return }
-        cancelLoading()
-        forwardStack.append(current)
-        current = destination
-        currentPage = page(for: destination)
-        trimHistory()
-        prunePageCache()
-        updateHistoryState()
+    func refreshCurrent(
+        renderingPreferences: RenderingPreferences,
+        onReload: (@MainActor (URL) -> Void)? = nil
+    ) {
+        guard let currentPage,
+              let wikiRootURL else {
+            return
+        }
+        if isLoading {
+            guard activeLoadPurpose != .navigation else { return }
+            pendingRefresh = PendingWikiRefresh(
+                renderingPreferences: renderingPreferences,
+                onReload: onReload
+            )
+            return
+        }
+        startRefresh(
+            url: currentPage.url,
+            wikiRootURL: wikiRootURL,
+            renderingPreferences: renderingPreferences,
+            onReload: onReload
+        )
     }
 
-    func goForward() {
-        guard let destination = forwardStack.popLast() else { return }
+    private func startRefresh(
+        url: URL,
+        wikiRootURL: URL,
+        renderingPreferences: RenderingPreferences,
+        onReload: (@MainActor (URL) -> Void)?
+    ) {
+        navigationGeneration += 1
+        let generation = navigationGeneration
+        loadTask?.cancel()
+        pageLoadWork?.cancel()
+        activeLoadPurpose = .refresh
+        errorDescription = nil
+        isLoading = true
+        let loader = self.loader
+        let work = Task.detached(priority: .userInitiated) {
+            loader(url, wikiRootURL, renderingPreferences)
+        }
+        pageLoadWork = work
+        loadTask = Task { [weak self] in
+            let result = await work.value
+            guard let self, generation == self.navigationGeneration else { return }
+            self.isLoading = false
+            self.activeLoadPurpose = nil
+            switch result {
+            case .success(let page):
+                self.current = .page(page.url)
+                self.currentPage = page
+                self.pageCache[page.url] = page
+                self.trimHistory()
+                self.prunePageCache()
+                self.errorDescription = nil
+                onReload?(page.url)
+            case .failure(let description):
+                self.errorDescription = description
+            case .cancelled:
+                break
+            }
+            self.startPendingRefreshIfNeeded()
+        }
+    }
+
+    @discardableResult
+    func goBack(
+        leavingScrollPosition: DocumentScrollPosition = .top
+    ) -> WikiHistoryNavigation? {
+        guard let destination = backStack.popLast() else { return nil }
         cancelLoading()
-        backStack.append(current)
-        current = destination
-        currentPage = page(for: destination)
+        errorDescription = nil
+        forwardStack.append(WikiHistoryEntry(
+            location: current,
+            scrollPosition: leavingScrollPosition
+        ))
+        current = destination.location
+        currentPage = page(for: destination.location)
         trimHistory()
         prunePageCache()
         updateHistoryState()
+        return WikiHistoryNavigation(
+            location: destination.location,
+            scrollPosition: destination.scrollPosition
+        )
+    }
+
+    @discardableResult
+    func goForward(
+        leavingScrollPosition: DocumentScrollPosition = .top
+    ) -> WikiHistoryNavigation? {
+        guard let destination = forwardStack.popLast() else { return nil }
+        cancelLoading()
+        errorDescription = nil
+        backStack.append(WikiHistoryEntry(
+            location: current,
+            scrollPosition: leavingScrollPosition
+        ))
+        current = destination.location
+        currentPage = page(for: destination.location)
+        trimHistory()
+        prunePageCache()
+        updateHistoryState()
+        return WikiHistoryNavigation(
+            location: destination.location,
+            scrollPosition: destination.scrollPosition
+        )
     }
 
     func cancelPendingNavigation() {
@@ -197,7 +320,18 @@ final class WikiNavigationModel: ObservableObject {
         pageLoadWork?.cancel()
         loadTask = nil
         pageLoadWork = nil
+        activeLoadPurpose = nil
+        pendingRefresh = nil
         isLoading = false
+    }
+
+    private func startPendingRefreshIfNeeded() {
+        guard let pendingRefresh else { return }
+        self.pendingRefresh = nil
+        refreshCurrent(
+            renderingPreferences: pendingRefresh.renderingPreferences,
+            onReload: pendingRefresh.onReload
+        )
     }
 
     private func updateHistoryState() {
@@ -226,15 +360,15 @@ final class WikiNavigationModel: ObservableObject {
     }
 
     private var historyPageURLs: Set<URL> {
-        Set((backStack + forwardStack).compactMap { location in
-            guard case .page(let url) = location else { return nil }
+        Set((backStack + forwardStack).compactMap { entry in
+            guard case .page(let url) = entry.location else { return nil }
             return url
         })
     }
 
     private var referencedPageURLs: Set<URL> {
-        let locations = backStack + [current] + forwardStack
-        return Set(locations.compactMap { location in
+        let historyLocations = (backStack + forwardStack).map(\.location)
+        return Set((historyLocations + [current]).compactMap { location in
             guard case .page(let url) = location else { return nil }
             return url
         })
@@ -246,7 +380,7 @@ final class WikiNavigationModel: ObservableObject {
     }
 
     private func removeOldestEvictableHistoryEntry() -> Bool {
-        if let index = backStack.firstIndex(where: { $0 != .root }) {
+        if let index = backStack.firstIndex(where: { $0.location != .root }) {
             backStack.remove(at: index)
             return true
         }

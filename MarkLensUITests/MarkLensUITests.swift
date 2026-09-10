@@ -452,7 +452,7 @@ private struct MarkLensAppHandle {
             "Expected the complete changelog context."
         )
         XCTAssertTrue(
-            notesWindow.staticTexts["1.8.0"].firstMatch
+            notesWindow.staticTexts["1.8.1"].firstMatch
                 .waitForExistence(timeout: 5),
             "Expected the current changelog section."
         )

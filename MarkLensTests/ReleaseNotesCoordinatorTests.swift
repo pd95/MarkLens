@@ -141,7 +141,7 @@ final class ReleaseNotesCoordinatorTests: XCTestCase {
         let changelog = try XCTUnwrap(ReleaseNotesCoordinator.loadBundledChangelog())
 
         XCTAssertTrue(changelog.contains("# Changelog"))
-        XCTAssertTrue(changelog.contains("## 1.8.0"))
+        XCTAssertTrue(changelog.contains("## 1.8.1"))
     }
 
     func testLocalDevelopmentBuildExposesFullChangelogWithoutPresentingAutomatically() {

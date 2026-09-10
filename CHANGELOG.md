@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.8.1
+
+- Improved YAML frontmatter parsing to preserve standard scalar and collection semantics while making wiki links embedded in text values clickable.
+- Disabled smart punctuation, automatic correction, completion, and text detection in Markdown source editors so typed source remains literal.
+- Fixed document autosaves and external-file refreshes to use the native document lifecycle without false conflict prompts or silently discarding Update and Cancel choices.
+
 ## 1.8.0
 
 - Added a collapsible document-details card for YAML frontmatter, with structured rendering for common metadata, nested values, and readable light and dark appearances.

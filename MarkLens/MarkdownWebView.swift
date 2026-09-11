@@ -1123,6 +1123,7 @@ struct MarkdownWebView: PlatformViewRepresentable {
             const visibleAnchors = new Set();
             let activeRestoration = null;
             let restorationTimeout = null;
+            let restorationScrollY = null;
             const progress = () => {
                 const maximum = Math.max(0, document.documentElement.scrollHeight - innerHeight);
                 return maximum === 0 ? 0 : scrollY / maximum;
@@ -1174,26 +1175,22 @@ struct MarkdownWebView: PlatformViewRepresentable {
                     restorationRequest: activeRestoration?.request ?? null
                 });
             };
-            let scheduled = false;
-            let lastReportTime = -Infinity;
-            const minimumReportInterval = 100;
+            let reportTimer = null;
+            let reportPending = false;
+            const reportDelay = 150;
+            const flushReport = () => {
+                reportTimer = null;
+                if (!reportPending) return;
+                reportPending = false;
+                requestAnimationFrame(report);
+                reportTimer = setTimeout(flushReport, reportDelay);
+            };
             const scheduleReport = () => {
-                if (scheduled) return;
-                scheduled = true;
-                const delay = Math.max(
-                    0,
-                    minimumReportInterval - (Date.now() - lastReportTime)
-                );
-                const runReport = () => requestAnimationFrame(() => {
-                    scheduled = false;
-                    lastReportTime = Date.now();
-                    report();
-                });
-                if (delay === 0) {
-                    runReport();
-                } else {
-                    setTimeout(runReport, delay);
-                }
+                reportPending = true;
+                if (reportTimer !== null) return;
+                reportPending = false;
+                requestAnimationFrame(report);
+                reportTimer = setTimeout(flushReport, reportDelay);
             };
             const visibilityObserver = new IntersectionObserver(entries => {
                 entries.forEach(entry => {
@@ -1206,7 +1203,6 @@ struct MarkdownWebView: PlatformViewRepresentable {
                 scheduleReport();
             });
             anchors.forEach(anchor => visibilityObserver.observe(anchor));
-            addEventListener('scroll', scheduleReport, { passive: true });
 
             const targetForLine = requestedLine => {
                 let lower = 0;
@@ -1274,6 +1270,7 @@ struct MarkdownWebView: PlatformViewRepresentable {
             };
             const cancelRestoration = () => {
                 activeRestoration = null;
+                restorationScrollY = null;
                 clearTimeout(restorationTimeout);
                 restorationTimeout = null;
             };
@@ -1300,8 +1297,18 @@ struct MarkdownWebView: PlatformViewRepresentable {
                     );
                     scrollTo(0, maximum * requestedProgress);
                 }
+                restorationScrollY = scrollY;
+                report();
+            };
+            const handleScroll = () => {
+                if (activeRestoration
+                    && Number.isFinite(restorationScrollY)
+                    && Math.abs(scrollY - restorationScrollY) > 0.5) {
+                    cancelRestoration();
+                }
                 scheduleReport();
             };
+            addEventListener('scroll', handleScroll, { passive: true });
             const layoutObserver = new ResizeObserver(() => {
                 if (activeRestoration) requestAnimationFrame(applyRestoration);
             });
@@ -1360,7 +1367,7 @@ struct MarkdownWebView: PlatformViewRepresentable {
                 },
                 report
             };
-            scheduleReport();
+            report();
         })();
         """
 

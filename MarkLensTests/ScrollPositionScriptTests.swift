@@ -88,6 +88,114 @@ final class ScrollPositionScriptTests: XCTestCase {
         XCTAssertEqual(progress, 0.305, accuracy: 0.001)
     }
 
+    func testUserScrollCancelsRestorationBeforeLaterLayoutChanges() throws {
+        let context = try makeContext(anchors: [
+            anchor(tag: "H2", text: "Destination", line: 40, top: 600)
+        ])
+
+        context.evaluateScript("""
+        window.MarkLensScroll.restore({
+            request: 17,
+            line: 40,
+            progress: 0.3,
+            anchor: null,
+            occurrence: null,
+            previousAnchor: null,
+            nextAnchor: null,
+            offset: 20
+        });
+        scrollY = 640;
+        eventListeners.scroll();
+        latestResizeObserver.callback();
+        window.MarkLensScroll.report();
+        """)
+
+        XCTAssertNil(context.exception)
+        XCTAssertEqual(context.objectForKeyedSubscript("scrollY")?.toInt32(), 640)
+        let position = try lastReportedPosition(in: context)
+        XCTAssertTrue(position["restorationRequest"] is NSNull)
+    }
+
+    func testProgrammaticRestorationScrollKeepsLayoutCorrectionActive() throws {
+        let context = try makeContext(anchors: [
+            anchor(tag: "H2", text: "Destination", line: 40, top: 600)
+        ])
+
+        context.evaluateScript("""
+        window.MarkLensScroll.restore({
+            request: 17,
+            line: 40,
+            progress: 0.3,
+            anchor: null,
+            occurrence: null,
+            previousAnchor: null,
+            nextAnchor: null,
+            offset: 20
+        });
+        eventListeners.scroll();
+        mockAnchors[0].top = 650;
+        latestResizeObserver.callback();
+        """)
+
+        XCTAssertNil(context.exception)
+        XCTAssertEqual(context.objectForKeyedSubscript("scrollY")?.toInt32(), 630)
+        let position = try lastReportedPosition(in: context)
+        XCTAssertEqual((position["restorationRequest"] as? NSNumber)?.intValue, 17)
+    }
+
+    func testUserScrollReportingIsBoundedAndIncludesFinalPosition() throws {
+        let context = try makeContext(anchors: [
+            anchor(tag: "H2", text: "Destination", line: 40, top: 600)
+        ])
+
+        context.evaluateScript("""
+        while (pendingTimeouts.length > 0) pendingTimeouts.shift().callback();
+        var reportsBeforeScroll = postedMessages.length;
+        scrollY = 100;
+        eventListeners.scroll();
+        var reportsAfterLeadingEvent = postedMessages.length;
+        scrollY = 200;
+        eventListeners.scroll();
+        scrollY = 300;
+        eventListeners.scroll();
+        var reportsBeforeInterval = postedMessages.length;
+        pendingTimeouts.shift().callback();
+        var reportsAfterInterval = postedMessages.length;
+        var intervalPosition = postedMessages[postedMessages.length - 1].progress;
+        scrollY = 400;
+        eventListeners.scroll();
+        pendingTimeouts.shift().callback();
+        var reportsAfterFinal = postedMessages.length;
+        var finalPosition = postedMessages[postedMessages.length - 1].progress;
+        """)
+
+        XCTAssertNil(context.exception)
+        XCTAssertEqual(
+            context.objectForKeyedSubscript("reportsAfterLeadingEvent")?.toInt32(),
+            (context.objectForKeyedSubscript("reportsBeforeScroll")?.toInt32() ?? 0) + 1
+        )
+        XCTAssertEqual(
+            context.objectForKeyedSubscript("reportsBeforeInterval")?.toInt32(),
+            context.objectForKeyedSubscript("reportsAfterLeadingEvent")?.toInt32()
+        )
+        XCTAssertEqual(
+            context.objectForKeyedSubscript("reportsAfterInterval")?.toInt32(),
+            (context.objectForKeyedSubscript("reportsBeforeInterval")?.toInt32() ?? 0) + 1
+        )
+        let intervalPosition = try XCTUnwrap(
+            context.objectForKeyedSubscript("intervalPosition")?.toDouble()
+        )
+        XCTAssertEqual(intervalPosition, 300.0 / 1_900.0, accuracy: 0.001)
+        XCTAssertEqual(
+            context.objectForKeyedSubscript("reportsAfterFinal")?.toInt32(),
+            (context.objectForKeyedSubscript("reportsAfterInterval")?.toInt32() ?? 0) + 1
+        )
+        let finalPosition = try XCTUnwrap(
+            context.objectForKeyedSubscript("finalPosition")?.toDouble()
+        )
+        XCTAssertEqual(finalPosition, 400.0 / 1_900.0, accuracy: 0.001)
+    }
+
     func testSelectionStartLineUsesNearestSourceAncestor() throws {
         let context = try makeContext(anchors: [])
         context.evaluateScript("""
@@ -250,14 +358,21 @@ final class ScrollPositionScriptTests: XCTestCase {
             constructor(callback) { this.callback = callback; }
             observe(target) { this.callback([{ target, isIntersecting: true }]); }
         };
+        var latestResizeObserver = null;
+        var pendingTimeouts = [];
         var ResizeObserver = class {
-            constructor(callback) { this.callback = callback; }
+            constructor(callback) {
+                this.callback = callback;
+                latestResizeObserver = this;
+            }
             observe() {}
         };
         function requestAnimationFrame(callback) { callback(); }
-        function addEventListener() {}
+        var eventListeners = {};
+        function addEventListener(name, callback) { eventListeners[name] = callback; }
         function setTimeout(callback, delay) {
             if (delay <= 100) callback();
+            else pendingTimeouts.push({ callback, delay });
             return 1;
         }
         function clearTimeout() {}

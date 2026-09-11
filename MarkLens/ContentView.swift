@@ -35,6 +35,10 @@ nonisolated struct DocumentScrollPosition: Equatable, Sendable {
 #endif
 }
 
+private final class PreviewScrollPositionStore {
+    var position = DocumentScrollPosition.top
+}
+
 nonisolated enum WikiRefreshScrollRestoration {
     case live
     case requested(position: DocumentScrollPosition, request: Int)
@@ -204,7 +208,9 @@ struct ContentView: View {
     @State private var previewFindFocusRequest = 0
     @State private var previewFindMatchCount = 0
     @State private var previewFindCurrentIndex = 0
-    @State private var previewScrollPosition = DocumentScrollPosition.top
+    // Scroll reports are navigation state, not rendered state. Publishing each
+    // report would reevaluate the full view hierarchy throughout a gesture.
+    @State private var previewScrollPositionStore = PreviewScrollPositionStore()
     @State private var sourceScrollPosition = DocumentScrollPosition.top
     @State private var previewScrollTarget = DocumentScrollPosition.top
     @State private var sourceScrollTarget = DocumentScrollPosition.top
@@ -673,7 +679,10 @@ struct ContentView: View {
             frontMatterExpanded: frontMatterExpandedBinding,
             sourceEditPositionRequest: sourceEditPositionRequest,
             sourceEditPositionAction: completeBeginRawEditing,
-            scrollPosition: $previewScrollPosition,
+            scrollPosition: Binding(
+                get: { previewScrollPositionStore.position },
+                set: { previewScrollPositionStore.position = $0 }
+            ),
             scrollTarget: previewScrollTarget,
             scrollRequest: previewScrollRequest,
             confirmedScrollRequest: $previewConfirmedScrollRequest
@@ -868,8 +877,8 @@ struct ContentView: View {
         )
         RawEditorPerformanceInstrumentation.measure("EditModeStatePreparation") {
             document.beginSourceEditing()
-            sourceScrollTarget = previewScrollPosition
-            sourceSelectionLine = selectedSourceLine ?? previewScrollPosition.sourceLine
+            sourceScrollTarget = previewScrollPositionStore.position
+            sourceSelectionLine = selectedSourceLine ?? previewScrollPositionStore.position.sourceLine
             sourceScrollRequest += 1
             isRawEditing = true
         }
@@ -917,7 +926,7 @@ struct ContentView: View {
     private func handleExternalFileChange() {
         guard let externalDocumentReloadCoordinator else { return }
         cancelExternalReloadRetry()
-        let preservedPosition = previewScrollPosition
+        let preservedPosition = previewScrollPositionStore.position
         handleExternalReloadResult(
             externalDocumentReloadCoordinator.handleChange(isEditing: isRawEditing),
             preservedPosition: preservedPosition
@@ -931,7 +940,7 @@ struct ContentView: View {
               ) else {
             return
         }
-        handleExternalReloadResult(result, preservedPosition: previewScrollPosition)
+        handleExternalReloadResult(result, preservedPosition: previewScrollPositionStore.position)
     }
 
     private func handleExternalReloadResult(
@@ -1036,7 +1045,7 @@ struct ContentView: View {
             // the position current at completion so a user's intervening scroll
             // is not replaced by the position captured when refresh began.
             restorePreviewScroll(to: scrollRestoration.resolvedPosition(
-                currentPosition: previewScrollPosition,
+                currentPosition: previewScrollPositionStore.position,
                 confirmedRequest: previewConfirmedScrollRequest
             ))
         }
@@ -1464,7 +1473,7 @@ struct ContentView: View {
             to: url,
             wikiRoot: wikiRoot,
             renderingPreferences: renderingPreferences,
-            leavingScrollPosition: previewScrollPosition
+            leavingScrollPosition: previewScrollPositionStore.position
         )
     }
 
@@ -1481,7 +1490,7 @@ struct ContentView: View {
     private func navigateWikiBack() {
         cancelWikiResolution()
         guard let navigation = wikiNavigation.goBack(
-            leavingScrollPosition: previewScrollPosition
+            leavingScrollPosition: previewScrollPositionStore.position
         ) else {
             return
         }
@@ -1502,7 +1511,7 @@ struct ContentView: View {
     private func navigateWikiForward() {
         cancelWikiResolution()
         guard let navigation = wikiNavigation.goForward(
-            leavingScrollPosition: previewScrollPosition
+            leavingScrollPosition: previewScrollPositionStore.position
         ) else {
             return
         }

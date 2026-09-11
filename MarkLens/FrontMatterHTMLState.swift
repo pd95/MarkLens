@@ -1,6 +1,6 @@
 import Foundation
 
-enum FrontMatterHTMLState {
+nonisolated enum FrontMatterHTMLState {
     private static let startMarker = "<!-- marklens-frontmatter:start -->"
     private static let endMarker = "<!-- marklens-frontmatter:end -->"
     private static let openingTag = "<details id=\"marklens-frontmatter\""

@@ -3,7 +3,7 @@ import Combine
 import Foundation
 import SwiftUI
 
-struct InstalledReleaseNotes: Equatable {
+nonisolated struct InstalledReleaseNotes: Equatable {
     let releaseTag: String
     let previousReleaseTag: String?
     let markdown: String
@@ -107,8 +107,7 @@ final class ReleaseNotesCoordinator: ObservableObject {
         let acknowledgedVersion = acknowledgedTag.flatMap(ReleaseVersion.init)
         let currentVersion = ReleaseVersion(requestedReleaseTag)!
 
-        if let acknowledgedTag,
-           let acknowledgedVersion,
+        if let acknowledgedVersion,
            acknowledgedVersion > currentVersion {
             defaults.set(requestedReleaseTag, forKey: Self.lastAcknowledgedReleaseKey)
             defaults.set(requestedReleaseTag, forKey: Self.notesReleaseKey)
@@ -123,8 +122,7 @@ final class ReleaseNotesCoordinator: ObservableObject {
             return
         }
 
-        if let acknowledgedTag,
-           let acknowledgedVersion,
+        if let acknowledgedVersion,
            acknowledgedVersion == currentVersion {
             let storedNotesRelease = defaults.string(forKey: Self.notesReleaseKey)
             let storedBaseline = defaults.string(forKey: Self.notesBaselineKey)

@@ -232,20 +232,18 @@ private extension XCUIApplication {
 
         let exportDirectory = FileManager.default.temporaryDirectory
             .appendingPathComponent("MarkLensUITests-\(UUID().uuidString)", isDirectory: true)
+        let temporaryDocumentURL = exportDirectory.appendingPathComponent(
+            fixtureURL.lastPathComponent
+        )
         do {
             try FileManager.default.createDirectory(
                 at: exportDirectory,
                 withIntermediateDirectories: true
             )
-            try FileManager.default.copyItem(
-                at: fixtureURL,
-                to: exportDirectory.appendingPathComponent(fixtureURL.lastPathComponent)
-            )
+            try Data(contentsOf: fixtureURL).write(to: temporaryDocumentURL, options: .atomic)
         } catch {
             XCTFail("Could not prepare the temporary test document: \(error)", file: file, line: line)
         }
-
-        let temporaryDocumentURL = exportDirectory.appendingPathComponent(fixtureURL.lastPathComponent)
 
         terminate()
         launchEnvironment["MARKLENS_UI_TEST_EXPORT_DIRECTORY"] = exportDirectory.path
@@ -256,8 +254,8 @@ private extension XCUIApplication {
             "",
             "-LastRenderedDocumentExportFormat",
             "pdf",
-        ] + additionalLaunchArguments + [temporaryDocumentURL.path]
-        launch()
+        ] + additionalLaunchArguments
+        open(temporaryDocumentURL)
 
         return previewHandle(
             documentTitle: "\(baseName).\(fileExtension)",

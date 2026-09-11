@@ -32,6 +32,7 @@ final class ExternalFileMonitor {
     private var generation: UInt64 = 0
     private var sourceGeneration: UInt64 = 0
     private var isActive = true
+    private var observedContents: Data?
 
     init(
         fileURL: URL,
@@ -41,6 +42,7 @@ final class ExternalFileMonitor {
         self.fileURL = fileURL.standardizedFileURL
         self.changeHandler = changeHandler
         self.timing = timing
+        observedContents = try? Data(contentsOf: self.fileURL)
 
         if installSource() == false {
             scheduleReconnect()
@@ -105,6 +107,18 @@ final class ExternalFileMonitor {
                 deliveryTask = nil
                 self.pendingChangeStartedAt = nil
                 self.lastChangeDetectedAt = nil
+                let fileURL = self.fileURL
+                let observedContents = self.observedContents
+                let snapshot = await Task.detached(priority: .utility) {
+                    let contents = try? Data(contentsOf: fileURL)
+                    return (contents: contents, changed: contents != observedContents)
+                }.value
+                guard isActive,
+                      generation == deliveryGeneration,
+                      snapshot.changed else {
+                    return
+                }
+                self.observedContents = snapshot.contents
                 changeHandler()
             } catch is CancellationError {
                 return

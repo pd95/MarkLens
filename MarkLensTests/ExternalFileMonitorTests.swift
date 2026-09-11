@@ -45,6 +45,26 @@ final class ExternalFileMonitorTests: XCTestCase {
         monitor.stop()
     }
 
+    func testIgnoresSameContentReplacementTriggeredByChangeHandler() throws {
+        let fixture = try MonitorFixture(initialText: "Before")
+        defer { fixture.remove() }
+
+        let changed = expectation(description: "content change signal")
+        var signalCount = 0
+        let monitor = makeMonitor(fileURL: fixture.fileURL) {
+            signalCount += 1
+            changed.fulfill()
+            try? Data("After".utf8).write(to: fixture.fileURL, options: .atomic)
+        }
+
+        try Data("After".utf8).write(to: fixture.fileURL, options: .atomic)
+
+        wait(for: [changed], timeout: 2)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+        XCTAssertEqual(signalCount, 1)
+        monitor.stop()
+    }
+
     func testCoalescesSuccessiveFileEvents() throws {
         let fixture = try MonitorFixture(initialText: "Before")
         defer { fixture.remove() }

@@ -5,7 +5,7 @@
 - Improved YAML frontmatter parsing to preserve standard scalar and collection semantics while making wiki links embedded in text values clickable.
 - Disabled smart punctuation, automatic correction, completion, and text detection in Markdown source editors so typed source remains literal.
 - Fixed document autosaves and external-file refreshes to use the native document lifecycle without false conflict prompts, reload loops from unchanged file events, or silently discarded Update and Cancel choices.
-- Improved wiki browsing by monitoring the currently displayed page, skipping unchanged renders, keeping scrolling smooth, and reliably preserving each history entry's position across Back, Forward, and external updates.
+- Improved wiki browsing by monitoring the currently displayed page, skipping unchanged renders, keeping scrolling smooth, starting first-time visits at the true page top, and reliably preserving each history entry's position across Back, Forward, and external updates.
 
 ## 1.8.0
 

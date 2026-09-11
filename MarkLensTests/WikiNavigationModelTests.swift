@@ -83,6 +83,35 @@ final class WikiNavigationModelTests: XCTestCase {
         XCTAssertEqual(backToRevisitedRoot?.scrollPosition, revisitedRootPosition)
     }
 
+    func testNewNavigationStartsAtTopBeforeHistoryRestoresSavedPosition() async {
+        let model = makeModel()
+        let root = URL(fileURLWithPath: "/wiki")
+        let first = root.appendingPathComponent("first.md")
+        let second = root.appendingPathComponent("second.md")
+        let firstPosition = Self.scrollPosition(line: 40, progress: 0.4)
+        var requestedPosition: DocumentScrollPosition?
+
+        model.navigate(to: first, wikiRoot: root) { navigation in
+            requestedPosition = navigation.scrollPosition
+        }
+        await waitForLoad(model)
+        XCTAssertEqual(requestedPosition, .top)
+
+        requestedPosition = nil
+        model.navigate(
+            to: second,
+            wikiRoot: root,
+            leavingScrollPosition: firstPosition
+        ) { navigation in
+            requestedPosition = navigation.scrollPosition
+        }
+        await waitForLoad(model)
+        XCTAssertEqual(requestedPosition, .top)
+
+        let backToFirst = model.goBack()
+        XCTAssertEqual(backToFirst?.scrollPosition, firstPosition)
+    }
+
     func testFailureAndStaleCompletionDoNotMutateHistory() async throws {
         let root = URL(fileURLWithPath: "/wiki")
         let slow = root.appendingPathComponent("slow.md")

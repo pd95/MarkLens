@@ -88,6 +88,29 @@ final class ScrollPositionScriptTests: XCTestCase {
         XCTAssertEqual(progress, 0.305, accuracy: 0.001)
     }
 
+    func testTopPositionUsesDocumentOriginInsteadOfFirstSourceAnchor() throws {
+        let context = try makeContext(anchors: [
+            anchor(tag: "DETAILS", text: "Frontmatter", line: 1, top: 17)
+        ])
+
+        context.evaluateScript("""
+        scrollY = 300;
+        window.MarkLensScroll.restore({
+            request: 18,
+            line: null,
+            progress: 0,
+            anchor: null,
+            occurrence: null,
+            previousAnchor: null,
+            nextAnchor: null,
+            offset: 0
+        });
+        """)
+
+        XCTAssertNil(context.exception)
+        XCTAssertEqual(context.objectForKeyedSubscript("scrollY")?.toInt32(), 0)
+    }
+
     func testUserScrollCancelsRestorationBeforeLaterLayoutChanges() throws {
         let context = try makeContext(anchors: [
             anchor(tag: "H2", text: "Destination", line: 40, top: 600)

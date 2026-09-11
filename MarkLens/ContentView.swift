@@ -24,7 +24,7 @@ nonisolated struct DocumentScrollPosition: Equatable, Sendable {
     var nextAnchorIdentity: String? = nil
     var viewportOffset: Double = 0
 
-    static let top = DocumentScrollPosition(sourceLine: 1, progress: 0)
+    static let top = DocumentScrollPosition(sourceLine: nil, progress: 0)
 
 #if DEBUG
     var diagnosticDescription: String {
@@ -1474,7 +1474,9 @@ struct ContentView: View {
             wikiRoot: wikiRoot,
             renderingPreferences: renderingPreferences,
             leavingScrollPosition: previewScrollPositionStore.position
-        )
+        ) { navigation in
+            restorePreviewScroll(to: navigation.scrollPosition)
+        }
     }
 
     private func activeWikiRoot(containing fileURL: URL) -> URL? {

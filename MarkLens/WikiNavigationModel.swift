@@ -131,7 +131,8 @@ final class WikiNavigationModel: ObservableObject {
         to url: URL,
         wikiRoot: URL,
         renderingPreferences: RenderingPreferences = .secureDefaults,
-        leavingScrollPosition: DocumentScrollPosition = .top
+        leavingScrollPosition: DocumentScrollPosition = .top,
+        onNavigation: (@MainActor (WikiHistoryNavigation) -> Void)? = nil
     ) {
         WikiScrollDiagnostics.captured(
             action: "navigate",
@@ -180,6 +181,10 @@ final class WikiNavigationModel: ObservableObject {
                 self.trimHistory()
                 self.prunePageCache()
                 self.updateHistoryState()
+                onNavigation?(WikiHistoryNavigation(
+                    location: .page(page.url),
+                    scrollPosition: .top
+                ))
             case .failure(let description):
                 self.errorDescription = description
             case .cancelled:

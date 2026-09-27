@@ -27,10 +27,10 @@ struct MarkdownWebView: PlatformViewRepresentable {
     var resources: [HTMLResource]
     var customCSS: String
     var documentURL: URL?
-    var openDocument: (URL, Int?) async throws -> Void
-    var openWikiLink: (String) -> Void
+    var openDocument: (URL, Int?, Bool) async throws -> Void
+    var openWikiLink: (String, Bool) -> Void
     var openCurrentLine: (Int) -> Void
-    var requestLocalDocumentAccess: (URL, String) -> Void
+    var requestLocalDocumentAccess: (URL, Int?, Bool, String) -> Void
     var localImagePermissionDenied: (URL) -> Void
     var reloadRequest: Int
     @Binding var outputRequest: RenderedDocumentOutputRequest?
@@ -61,10 +61,10 @@ struct MarkdownWebView: PlatformViewRepresentable {
         resources: [HTMLResource] = [],
         customCSS: String = "",
         documentURL: URL? = nil,
-        openDocument: @escaping (URL, Int?) async throws -> Void = { _, _ in },
-        openWikiLink: @escaping (String) -> Void = { _ in },
+        openDocument: @escaping (URL, Int?, Bool) async throws -> Void = { _, _, _ in },
+        openWikiLink: @escaping (String, Bool) -> Void = { _, _ in },
         openCurrentLine: @escaping (Int) -> Void = { _ in },
-        requestLocalDocumentAccess: @escaping (URL, String) -> Void = { _, _ in },
+        requestLocalDocumentAccess: @escaping (URL, Int?, Bool, String) -> Void = { _, _, _, _ in },
         localImagePermissionDenied: @escaping (URL) -> Void = { _ in },
         reloadRequest: Int = 0,
         outputRequest: Binding<RenderedDocumentOutputRequest?> = .constant(nil),
@@ -156,6 +156,12 @@ struct MarkdownWebView: PlatformViewRepresentable {
             forMainFrameOnly: true
         ))
         context.coordinator.localImageHandler = localImageHandler
+        config.userContentController.add(context.coordinator, name: Self.linkContextMessageHandler)
+        config.userContentController.addUserScript(WKUserScript(
+            source: Self.linkContextScript,
+            injectionTime: .atDocumentEnd,
+            forMainFrameOnly: true
+        ))
 #endif
         let webView = WKWebView(frame: .zero, configuration: config)
 #if os(macOS)
@@ -199,6 +205,9 @@ struct MarkdownWebView: PlatformViewRepresentable {
         view.uiDelegate = nil
         view.configuration.userContentController.removeScriptMessageHandler(forName: Self.scrollMessageHandler)
         view.configuration.userContentController.removeScriptMessageHandler(forName: Self.frontMatterMessageHandler)
+#if os(macOS)
+        view.configuration.userContentController.removeScriptMessageHandler(forName: Self.linkContextMessageHandler)
+#endif
         coordinator.searchGeneration += 1
         coordinator.cancelOutput()
         coordinator.removeReloadSnapshot()
@@ -256,6 +265,7 @@ struct MarkdownWebView: PlatformViewRepresentable {
         var resourceHandler: HTMLResourceSchemeHandler?
 #if os(macOS)
         weak var localImageHandler: LocalImageSchemeHandler?
+        private var contextLink: URL?
 #endif
 
         var isPageReady = false
@@ -419,6 +429,12 @@ struct MarkdownWebView: PlatformViewRepresentable {
             _ userContentController: WKUserContentController,
             didReceive message: WKScriptMessage
         ) {
+#if os(macOS)
+            if message.name == MarkdownWebView.linkContextMessageHandler {
+                showLinkContextMenu(for: message)
+                return
+            }
+#endif
             guard let value = message.body as? [String: Any] else { return }
             if message.name == MarkdownWebView.frontMatterMessageHandler {
                 guard let expanded = value["expanded"] as? Bool else { return }
@@ -950,6 +966,80 @@ struct MarkdownWebView: PlatformViewRepresentable {
             return components?.url
         }
 
+#if os(macOS)
+        private func showLinkContextMenu(for message: WKScriptMessage) {
+            guard message.frameInfo.isMainFrame,
+                  let webView,
+                  let value = message.body as? [String: Any],
+                  let rawURL = value["href"] as? String,
+                  let url = URL(string: rawURL),
+                  let x = (value["x"] as? NSNumber)?.doubleValue,
+                  let y = (value["y"] as? NSNumber)?.doubleValue,
+                  url.isFileURL || url.scheme?.caseInsensitiveCompare("marklens-wikilink") == .orderedSame
+            else { return }
+            if url.isFileURL {
+                guard WikiLinkResolver.defaultMarkdownExtensions.contains(url.pathExtension.lowercased()) else { return }
+            } else {
+                guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+                      components.host == "open",
+                      components.queryItems?.first(where: { $0.name == "target" })?.value?.isEmpty == false
+                else { return }
+            }
+
+            contextLink = url
+            let menu = NSMenu()
+            menu.addItem(withTitle: "Open", action: #selector(openContextLink(_:)), keyEquivalent: "").target = self
+            menu.addItem(withTitle: "Open in New Tab", action: #selector(openContextLinkInTab(_:)), keyEquivalent: "").target = self
+            menu.addItem(.separator())
+            menu.addItem(withTitle: "Copy Link Address", action: #selector(copyContextLink(_:)), keyEquivalent: "").target = self
+            menu.popUp(positioning: nil, at: NSPoint(x: x, y: webView.bounds.height - y), in: webView)
+        }
+
+        @objc private func openContextLink(_ sender: Any?) {
+            guard let contextLink else { return }
+            activateLocalLink(contextLink, inNewTab: false)
+        }
+
+        @objc private func openContextLinkInTab(_ sender: Any?) {
+            guard let contextLink else { return }
+            activateLocalLink(contextLink, inNewTab: true)
+        }
+
+        @objc private func copyContextLink(_ sender: Any?) {
+            guard let contextLink else { return }
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(contextLink.absoluteString, forType: .string)
+        }
+
+        private func activateLocalLink(_ url: URL, inNewTab: Bool) {
+            if url.isFileURL {
+                guard let documentURL = urlWithoutFragment(url) else { return }
+                if documentURL.standardizedFileURL == parent.documentURL?.standardizedFileURL,
+                   let line = sourceLine(in: url) {
+                    parent.openCurrentLine(line)
+                    return
+                }
+                Task { @MainActor in
+                    do {
+                        try await parent.openDocument(documentURL, sourceLine(in: url), inNewTab)
+                    } catch {
+                        parent.requestLocalDocumentAccess(documentURL, sourceLine(in: url), inNewTab, error.localizedDescription)
+                    }
+                }
+            } else if let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+                      let target = components.queryItems?.first(where: { $0.name == "target" })?.value {
+                parent.openWikiLink(target, inNewTab)
+            }
+        }
+
+        private func sourceLine(in url: URL) -> Int? {
+            guard let fragment = url.fragment,
+                  fragment.hasPrefix("marklens-line="),
+                  let line = Int(fragment.dropFirst("marklens-line=".count)), line > 0 else { return nil }
+            return line
+        }
+#endif
+
         private func isSameDocumentAnchor(_ url: URL, in webView: WKWebView) -> Bool {
             guard url.fragment != nil, let currentURL = webView.url else { return false }
             return urlWithoutFragment(url) == urlWithoutFragment(currentURL)
@@ -975,6 +1065,12 @@ struct MarkdownWebView: PlatformViewRepresentable {
             }
 
 #if os(macOS)
+            let inNewTab = navigationAction.modifierFlags.contains(.command)
+#else
+            let inNewTab = false
+#endif
+
+#if os(macOS)
             if url.isFileURL,
                let fragment = url.fragment,
                fragment.hasPrefix("marklens-line="),
@@ -985,9 +1081,9 @@ struct MarkdownWebView: PlatformViewRepresentable {
                 } else {
                     Task { @MainActor in
                         do {
-                            try await parent.openDocument(documentURL, line)
+                            try await parent.openDocument(documentURL, line, inNewTab)
                         } catch {
-                            parent.requestLocalDocumentAccess(documentURL, error.localizedDescription)
+                            parent.requestLocalDocumentAccess(documentURL, line, inNewTab, error.localizedDescription)
                         }
                     }
                 }
@@ -1006,7 +1102,7 @@ struct MarkdownWebView: PlatformViewRepresentable {
                    components.host == "open",
                    let target = components.queryItems?.first(where: { $0.name == "target" })?.value,
                    target.isEmpty == false {
-                    parent.openWikiLink(target)
+                    parent.openWikiLink(target, inNewTab)
                 }
                 decisionHandler(.cancel)
                 return
@@ -1020,9 +1116,9 @@ struct MarkdownWebView: PlatformViewRepresentable {
                 }
                 Task { @MainActor in
                     do {
-                        try await parent.openDocument(documentURL, nil)
+                        try await parent.openDocument(documentURL, nil, inNewTab)
                     } catch {
-                        parent.requestLocalDocumentAccess(documentURL, error.localizedDescription)
+                        parent.requestLocalDocumentAccess(documentURL, nil, inNewTab, error.localizedDescription)
                     }
                 }
 #else
@@ -1117,6 +1213,22 @@ struct MarkdownWebView: PlatformViewRepresentable {
     private static let resourceScheme = "marklens-resource"
     private static let scrollMessageHandler = "marklensScrollPosition"
     private static let frontMatterMessageHandler = "marklensFrontMatter"
+#if os(macOS)
+    private static let linkContextMessageHandler = "marklensLinkContext"
+    private static let linkContextScript = """
+        document.addEventListener('contextmenu', event => {
+            const link = event.target instanceof Element ? event.target.closest('a[href]') : null;
+            if (!link) return;
+            const url = new URL(link.href, document.baseURI);
+            if (url.protocol !== 'file:' && url.protocol !== 'marklens-wikilink:') return;
+            if (url.protocol === 'file:' && !/\\.(md|markdown|mdown|mkd|mkdn)$/i.test(url.pathname)) return;
+            event.preventDefault();
+            window.webkit.messageHandlers.marklensLinkContext.postMessage({
+                href: url.href, x: event.clientX, y: event.clientY
+            });
+        }, true);
+        """
+#endif
 
     static let scrollPositionScript = """
         (() => {

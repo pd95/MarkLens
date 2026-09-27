@@ -160,6 +160,7 @@ struct ContentView: View {
     @Environment(\.openDocument) private var openDocument
     @Environment(\.openWindow) private var openWindow
     @EnvironmentObject private var lineNavigation: LineNavigationCoordinator
+    @EnvironmentObject private var documentTabs: DocumentTabCoordinator
     @EnvironmentObject private var releaseNotesCoordinator: ReleaseNotesCoordinator
     @EnvironmentObject private var updateChecker: UpdateChecker
 #endif
@@ -189,10 +190,15 @@ struct ContentView: View {
     @State private var failedLocalImageURLs: Set<URL> = []
     @State private var wikiLinkMatches: [URL] = []
     @State private var wikiLinkMatchesRoot: URL?
+    @State private var wikiLinkMatchesOpenInTab = false
     @State private var wikiResolutionGeneration = 0
     @State private var isResolvingWikiLink = false
     @State private var wikiResolutionWork: Task<WikiLinkResolution, Never>?
     @State private var pendingRootLine: Int?
+    @State private var viewModeEnabled = false
+    @State private var preferenceFileURL: URL?
+    @State private var hasLoadedViewModePreference = false
+    @State private var isDetachingViewMode = false
 #endif
     @State private var localDocumentError: String?
     @State private var outputRequest: RenderedDocumentOutputRequest?
@@ -331,7 +337,7 @@ struct ContentView: View {
                 }
 
 #if os(macOS)
-                if wikiNavigation.hasBrowserHistory {
+                if viewModeEnabled && wikiNavigation.hasBrowserHistory {
                     ToolbarItemGroup(placement: .navigation) {
                         Button {
                             navigateWikiBack()
@@ -369,12 +375,25 @@ struct ContentView: View {
                 if shouldOfferWikiFolderAccess {
                     ToolbarItem(placement: .primaryAction) {
                         Button {
-                            pendingLocalAccessRequest = .wikiFolder(nil)
+                            pendingLocalAccessRequest = .wikiFolder(nil, false)
                         } label: {
                             Label("Allow Wiki Folder Access", systemImage: "folder.badge.plus")
                         }
                         .accessibilityIdentifier("allowWikiFolderAccessButton")
                     }
+                }
+
+                ToolbarItem(placement: .primaryAction) {
+                    Toggle(isOn: Binding(
+                        get: { viewModeEnabled },
+                        set: { setViewModeEnabled($0) }
+                    )) {
+                        Label("Browse Links Here", systemImage: "square.stack")
+                    }
+                    .toggleStyle(.button)
+                    .help("Open local Markdown and wiki links in this window")
+                    .accessibilityIdentifier("viewModeButton")
+                    .disabled(isWikiNavigationLoading || isDetachingViewMode)
                 }
 
                 if failedLocalImageURLs.isEmpty == false {
@@ -541,6 +560,13 @@ struct ContentView: View {
         .onAppear {
             startExternalFileMonitor()
             restartWikiFileMonitor()
+            loadViewModePreference()
+            acceptDocumentHandoff()
+        }
+        .onReceive(documentTabs.handoffRequests) { url in
+            if url == fileURL?.standardizedFileURL {
+                acceptDocumentHandoff()
+            }
         }
         .onReceive(lineNavigation.$requests) { requests in
             guard let fileURL,
@@ -575,6 +601,7 @@ struct ContentView: View {
             externalReloadErrorDescription = nil
             startExternalFileMonitor()
             restartWikiFileMonitor()
+            loadViewModePreference()
         }
         .onChange(of: wikiNavigation.currentPage?.url) {
             restartWikiFileMonitor()
@@ -688,9 +715,9 @@ struct ContentView: View {
             openDocument: openLocalDocument,
             openWikiLink: openWikiLink,
             openCurrentLine: openCurrentLine,
-            requestLocalDocumentAccess: { url, errorDescription in
+            requestLocalDocumentAccess: { url, line, inNewTab, errorDescription in
 #if os(macOS)
-                handleLocalDocumentOpenFailure(url, errorDescription: errorDescription)
+                handleLocalDocumentOpenFailure(url, line: line, inNewTab: inNewTab, errorDescription: errorDescription)
 #else
                 localDocumentError = errorDescription
 #endif
@@ -757,8 +784,9 @@ struct ContentView: View {
     private var wikiLinkMatchChooser: some View {
         if let root = wikiLinkMatchesRoot {
             WikiLinkMatchChooser(matches: wikiLinkMatches, root: root) { url in
+                let inNewTab = wikiLinkMatchesOpenInTab
                 clearWikiLinkMatches()
-                openResolvedWikiDocument(url, wikiRoot: root)
+                openResolvedWikiDocument(url, wikiRoot: root, inNewTab: inNewTab)
             }
         } else {
             EmptyView()
@@ -1128,6 +1156,69 @@ struct ContentView: View {
         wikiNavigation.reloadCurrent(renderingPreferences: renderingPreferences)
     }
 
+#if os(macOS)
+    private func loadViewModePreference() {
+        let key = fileURL?.standardizedFileURL
+        guard !hasLoadedViewModePreference || key != preferenceFileURL else { return }
+        hasLoadedViewModePreference = true
+        preferenceFileURL = key
+        viewModeEnabled = ViewModePreferences.isEnabled(for: key)
+    }
+
+    private func setViewModeEnabled(_ enabled: Bool) {
+        guard enabled != viewModeEnabled, !isDetachingViewMode else { return }
+        if !enabled, let page = wikiNavigation.currentPage {
+            isDetachingViewMode = true
+            Task {
+                defer { isDetachingViewMode = false }
+                let handoff = DocumentViewHandoff(
+                    scrollPosition: previewScrollPositionStore.position,
+                    findText: previewFindText,
+                    findPresented: isPreviewFindPresented,
+                    frontMatterExpanded: expandedFrontMatterPages.contains(.wiki(page.url.standardizedFileURL))
+                )
+                do {
+                    try await documentTabs.openInTab(page.url, beside: documentTabs.window(for: fileURL))
+                    documentTabs.enqueue(handoff, for: page.url)
+                    while wikiNavigation.currentPage != nil {
+                        guard let navigation = wikiNavigation.goBack(
+                            leavingScrollPosition: previewScrollPositionStore.position
+                        ) else { break }
+                        if wikiNavigation.currentPage == nil {
+                            restorePreviewScroll(to: navigation.scrollPosition)
+                        }
+                    }
+                    viewModeEnabled = false
+                    ViewModePreferences.setEnabled(false, for: fileURL)
+                } catch {
+                    documentTabs.cancelHandoff(for: page.url)
+                    localDocumentError = error.localizedDescription
+                }
+            }
+        } else {
+            viewModeEnabled = enabled
+            ViewModePreferences.setEnabled(enabled, for: fileURL)
+        }
+    }
+
+    private func acceptDocumentHandoff() {
+        guard let fileURL,
+              let request = documentTabs.handoffs[fileURL.standardizedFileURL] else { return }
+        Task { @MainActor in
+            guard let handoff = documentTabs.takeHandoff(for: fileURL, id: request.id) else { return }
+            if handoff.frontMatterExpanded {
+                expandedFrontMatterPages.insert(.root)
+            }
+            previewFindText = handoff.findText
+            isPreviewFindPresented = handoff.findPresented
+            if !handoff.findText.isEmpty {
+                previewFindRequest += 1
+            }
+            restorePreviewScroll(to: handoff.scrollPosition)
+        }
+    }
+#endif
+
     private var displayedURL: URL? {
         wikiNavigation.currentPage?.url ?? fileURL
     }
@@ -1207,16 +1298,31 @@ struct ContentView: View {
 #endif
     }
 
-    private var openLocalDocument: (URL, Int?) async throws -> Void {
+    private var openLocalDocument: (URL, Int?, Bool) async throws -> Void {
 #if os(macOS)
-        { url, line in
+        { url, line, inNewTab in
+            guard isSupportedMarkdownDocument(url) else {
+                throw CocoaError(.fileReadUnsupportedScheme)
+            }
+            if viewModeEnabled && !inNewTab && !localDocumentAccess.hasAccess(to: url) {
+                throw CocoaError(.fileReadNoPermission)
+            }
+            if viewModeEnabled && !inNewTab {
+                navigateInView(to: url, line: line)
+                return
+            }
             if let line {
                 lineNavigation.enqueue(fileURL: url, line: line)
             }
-            try await openDocument(at: url)
+            do {
+                try await openLinkedDocument(url, inNewTab: inNewTab)
+            } catch {
+                lineNavigation.cancel(for: url)
+                throw error
+            }
         }
 #else
-        { _, _ in }
+        { _, _, _ in }
 #endif
     }
 
@@ -1228,10 +1334,10 @@ struct ContentView: View {
         }
     }
 
-    private var openWikiLink: (String) -> Void {
-        { target in
+    private var openWikiLink: (String, Bool) -> Void {
+        { target, inNewTab in
 #if os(macOS)
-            resolveWikiLink(target)
+            resolveWikiLink(target, inNewTab: inNewTab)
 #else
             localDocumentError = "Wiki folder navigation is available on macOS."
 #endif
@@ -1373,7 +1479,7 @@ struct ContentView: View {
     private var localAccessExplanation: String {
         guard let request = pendingLocalAccessRequest else { return "" }
         switch request {
-        case .document(let targetURL):
+        case .document(let targetURL, _, _):
             return "\(targetURL.lastPathComponent) is inside the \(localAccessFolderName) folder. macOS requires your permission before MarkLens can open linked files in this folder. Access will be limited to \(localAccessFolderName) and used only for local document links."
         case .images:
             return "Some images are inside the \(localAccessFolderName) folder. macOS requires your permission before MarkLens can load local images in this document. Access will be limited to \(localAccessFolderName) and used only for local document resources."
@@ -1425,10 +1531,10 @@ struct ContentView: View {
             do {
                 try localDocumentAccess.authorize(folder: selectedFolder)
                 switch request {
-                case .document(let targetURL):
+                case .document(let targetURL, let line, let inNewTab):
                     Task {
                         do {
-                            try await openDocument(at: targetURL)
+                            try await openLocalDocument(targetURL, line, inNewTab)
                         } catch {
                             lineNavigation.cancel(for: targetURL)
                             localDocumentError = error.localizedDescription
@@ -1436,9 +1542,9 @@ struct ContentView: View {
                     }
                 case .images:
                     failedLocalImageURLs.removeAll()
-                case .wikiFolder(let target):
+                case .wikiFolder(let target, let inNewTab):
                     if let target {
-                        resolveWikiLink(target)
+                        resolveWikiLink(target, inNewTab: inNewTab)
                     }
                 }
             } catch {
@@ -1450,7 +1556,9 @@ struct ContentView: View {
         }
     }
 
-    private func handleLocalDocumentOpenFailure(_ url: URL, errorDescription: String) {
+    private func handleLocalDocumentOpenFailure(
+        _ url: URL, line: Int?, inNewTab: Bool, errorDescription: String
+    ) {
         guard isSupportedMarkdownDocument(url) else {
             lineNavigation.cancel(for: url)
             localDocumentError = "\(url.lastPathComponent) is not a supported markdown document."
@@ -1460,7 +1568,7 @@ struct ContentView: View {
             lineNavigation.cancel(for: url)
             localDocumentError = errorDescription
         } else {
-            pendingLocalAccessRequest = .document(url)
+            pendingLocalAccessRequest = .document(url, line, inNewTab)
         }
     }
 
@@ -1483,13 +1591,13 @@ struct ContentView: View {
         return localDocumentAccess.authorizedFolder(containing: fileURL) == nil
     }
 
-    private func resolveWikiLink(_ target: String) {
+    private func resolveWikiLink(_ target: String, inNewTab: Bool = false) {
         guard let fileURL else {
             localDocumentError = "Save this document before opening wikilinks."
             return
         }
         guard let root = activeWikiRoot(containing: fileURL) else {
-            pendingLocalAccessRequest = .wikiFolder(target)
+            pendingLocalAccessRequest = .wikiFolder(target, inNewTab)
             return
         }
 
@@ -1522,10 +1630,11 @@ struct ContentView: View {
             switch resolution {
             case .success(let matches):
                 if matches.count == 1, let match = matches.first {
-                    openResolvedWikiDocument(match, wikiRoot: root)
+                    openResolvedWikiDocument(match, wikiRoot: root, inNewTab: inNewTab)
                 } else {
                     wikiLinkMatchesRoot = root
                     wikiLinkMatches = matches
+                    wikiLinkMatchesOpenInTab = inNewTab
                 }
             case .failure(let description):
                 localDocumentError = description
@@ -1535,14 +1644,57 @@ struct ContentView: View {
         }
     }
 
-    private func openResolvedWikiDocument(_ url: URL, wikiRoot: URL) {
+    private func openResolvedWikiDocument(_ url: URL, wikiRoot: URL, inNewTab: Bool) {
+        if viewModeEnabled && !inNewTab {
+            navigateInView(to: url, wikiRoot: wikiRoot)
+        } else {
+            Task {
+                do {
+                    try await openLinkedDocument(url, inNewTab: inNewTab)
+                } catch {
+                    localDocumentError = error.localizedDescription
+                }
+            }
+        }
+    }
+
+    private func openLinkedDocument(_ url: URL, inNewTab: Bool) async throws {
+        if inNewTab {
+            try await documentTabs.openInTab(url, beside: documentTabs.window(for: fileURL))
+            return
+        }
+        switch LinkedDocumentOpenPreference.current() {
+        case .followSystem:
+            try await openDocument(at: url)
+        case .newWindow:
+            try await documentTabs.openInWindow(url)
+        case .newTab:
+            try await documentTabs.openInTab(url, beside: documentTabs.window(for: fileURL))
+        }
+    }
+
+    private func navigateInView(to url: URL, line: Int? = nil) {
+        guard let root = localDocumentAccess.authorizedFolder(containing: url) else {
+            pendingLocalAccessRequest = .document(url, line, false)
+            return
+        }
+        navigateInView(to: url, wikiRoot: root, line: line)
+    }
+
+    private func navigateInView(to url: URL, wikiRoot: URL, line: Int? = nil) {
         wikiNavigation.navigate(
             to: url,
             wikiRoot: wikiRoot,
             renderingPreferences: renderingPreferences,
             leavingScrollPosition: previewScrollPositionStore.position
         ) { navigation in
-            restorePreviewScroll(to: navigation.scrollPosition)
+            if let line {
+                restorePreviewScroll(
+                    to: DocumentScrollPosition(sourceLine: line, progress: 0), highlight: true
+                )
+            } else {
+                restorePreviewScroll(to: navigation.scrollPosition)
+            }
         }
     }
 
@@ -1608,6 +1760,7 @@ struct ContentView: View {
     private func clearWikiLinkMatches() {
         wikiLinkMatches = []
         wikiLinkMatchesRoot = nil
+        wikiLinkMatchesOpenInTab = false
     }
 
     private func isSupportedMarkdownDocument(_ url: URL) -> Bool {
@@ -1619,13 +1772,13 @@ struct ContentView: View {
 
 #if os(macOS)
 private enum LocalAccessRequest {
-    case document(URL)
+    case document(URL, Int?, Bool)
     case images(URL)
-    case wikiFolder(String?)
+    case wikiFolder(String?, Bool)
 
     var targetURL: URL? {
         switch self {
-        case .document(let url), .images(let url):
+        case .document(let url, _, _), .images(let url):
             url
         case .wikiFolder:
             nil
@@ -1841,6 +1994,8 @@ private struct PreviewFindBar: View {
 #if os(macOS)
     ContentView(document: MarkdownDocument(text: MarkdownDocument.starterText))
         .environmentObject(LocalDocumentAccess())
+        .environmentObject(LineNavigationCoordinator())
+        .environmentObject(DocumentTabCoordinator())
         .environmentObject(UpdateChecker())
         .environmentObject(ReleaseNotesCoordinator())
 #else

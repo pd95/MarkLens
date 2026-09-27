@@ -29,6 +29,10 @@ struct MarkLensApp: App {
         AppearancePreferences.registerDefaults()
         SecurityPreferences.registerDefaults()
         UpdatePreferences.registerDefaults()
+#if os(macOS)
+        ViewModePreferences.registerDefaults()
+        LinkedDocumentOpenPreference.registerDefaults()
+#endif
     }
 
     var body: some Scene {
@@ -39,6 +43,7 @@ struct MarkLensApp: App {
 #if os(macOS)
                 .environmentObject(appDelegate.localDocumentAccess)
                 .environmentObject(appDelegate.lineNavigation)
+                .environmentObject(appDelegate.documentTabs)
 #else
                 .environmentObject(localDocumentAccess)
 #endif

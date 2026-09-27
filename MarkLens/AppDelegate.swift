@@ -8,6 +8,7 @@ import Cocoa
 class AppDelegate: NSObject, NSApplicationDelegate {
     var exitAfterLastWindow: Bool = false
     let lineNavigation = LineNavigationCoordinator()
+    let documentTabs = DocumentTabCoordinator()
     let localDocumentAccess = LocalDocumentAccess()
     
     // MARK: - NSApplicationDelegate

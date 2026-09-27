@@ -14,6 +14,160 @@ final class MarkLensUITests: XCTestCase {
     }
 
     @MainActor
+    func testLocalMarkdownLinkOffersNativeNewTabAction() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("MarkLensTabUITest-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let source = directory.appendingPathComponent("source.md")
+        let target = directory.appendingPathComponent("target.md")
+        try "[Target](target.md)".write(to: source, atomically: true, encoding: .utf8)
+        try "# Target".write(to: target, atomically: true, encoding: .utf8)
+
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "-ApplePersistenceIgnoreState", "YES",
+            "-DefaultViewModeEnabled", "NO",
+            "-LinkedDocumentOpenPreference", "newWindow"
+        ]
+        app.open(source)
+        defer { app.terminate() }
+
+        let window = app.windows["source.md"].firstMatch
+        XCTAssertTrue(window.waitForExistence(timeout: 5))
+        let link = window.webViews.links["Target"].firstMatch
+        XCTAssertTrue(link.waitForExistence(timeout: 5))
+        link.rightClick()
+        let newTab = app.menuItems["Open in New Tab"].firstMatch
+        XCTAssertTrue(newTab.waitForExistence(timeout: 5))
+        newTab.click()
+        let targetWindow = app.windows["target.md"].firstMatch
+        XCTAssertTrue(targetWindow.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(targetWindow.isHittable, "The new document tab should be selected.")
+    }
+
+    @MainActor
+    func testOpenInWindowKeepsDocumentSeparateAndReusesIt() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("MarkLensWindowUITest-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let source = directory.appendingPathComponent("source.md")
+        let target = directory.appendingPathComponent("target.md")
+        try "[Target](target.md)".write(to: source, atomically: true, encoding: .utf8)
+        try "# Target".write(to: target, atomically: true, encoding: .utf8)
+
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "-ApplePersistenceIgnoreState", "YES",
+            "-DefaultViewModeEnabled", "NO",
+            "-LinkedDocumentOpenPreference", "newWindow"
+        ]
+        app.open(source)
+        defer { app.terminate() }
+
+        let sourceWindow = app.windows["source.md"].firstMatch
+        XCTAssertTrue(sourceWindow.waitForExistence(timeout: 5))
+        let link = sourceWindow.webViews.links["Target"].firstMatch
+        XCTAssertTrue(link.waitForExistence(timeout: 5))
+        link.click()
+        let targetWindow = app.windows["target.md"].firstMatch
+        XCTAssertTrue(targetWindow.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(sourceWindow.exists, "The source should remain a separate window.")
+        XCTAssertTrue(targetWindow.isHittable)
+
+        sourceWindow.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.02)).click()
+        link.click()
+        XCTAssertTrue(targetWindow.waitForExistence(timeout: 5))
+        XCTAssertEqual(app.windows.matching(identifier: "target.md").count, 1)
+        XCTAssertTrue(targetWindow.isHittable)
+    }
+
+    @MainActor
+    func testNormalLinkCanOpenInNewTabFromAppPreference() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("MarkLensPreferredTabUITest-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let source = directory.appendingPathComponent("source.md")
+        let target = directory.appendingPathComponent("target.md")
+        try "[Target](target.md)".write(to: source, atomically: true, encoding: .utf8)
+        try "# Target".write(to: target, atomically: true, encoding: .utf8)
+
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "-ApplePersistenceIgnoreState", "YES",
+            "-DefaultViewModeEnabled", "NO",
+            "-LinkedDocumentOpenPreference", "newTab"
+        ]
+        app.open(source)
+        defer { app.terminate() }
+
+        let sourceWindow = app.windows["source.md"].firstMatch
+        XCTAssertTrue(sourceWindow.waitForExistence(timeout: 5))
+        let link = sourceWindow.webViews.links["Target"].firstMatch
+        XCTAssertTrue(link.waitForExistence(timeout: 5))
+        link.click()
+        let targetWindow = app.windows["target.md"].firstMatch
+        XCTAssertTrue(targetWindow.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(targetWindow.isHittable)
+    }
+
+    @MainActor
+    func testCommandClickOpensLocalMarkdownInSelectedTab() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("MarkLensCommandTabUITest-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let source = directory.appendingPathComponent("source.md")
+        let target = directory.appendingPathComponent("target.md")
+        try "[Target](target.md)".write(to: source, atomically: true, encoding: .utf8)
+        try "# Target".write(to: target, atomically: true, encoding: .utf8)
+
+        let app = XCUIApplication()
+        app.launchArguments = ["-ApplePersistenceIgnoreState", "YES", "-DefaultViewModeEnabled", "YES"]
+        app.open(source)
+        defer { app.terminate() }
+
+        let sourceWindow = app.windows["source.md"].firstMatch
+        XCTAssertTrue(sourceWindow.waitForExistence(timeout: 5))
+        let link = sourceWindow.webViews.links["Target"].firstMatch
+        XCTAssertTrue(link.waitForExistence(timeout: 5))
+        XCUIElement.perform(withKeyModifiers: .command) {
+            link.click()
+        }
+        let targetWindow = app.windows["target.md"].firstMatch
+        XCTAssertTrue(targetWindow.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(targetWindow.isHittable)
+    }
+
+    @MainActor
+    func testViewModeRequestsFolderAccessForInWindowLink() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("MarkLensViewModeUITest-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let source = directory.appendingPathComponent("source.md")
+        let target = directory.appendingPathComponent("target.md")
+        try "[Target](target.md)".write(to: source, atomically: true, encoding: .utf8)
+        try "# Target".write(to: target, atomically: true, encoding: .utf8)
+
+        let app = XCUIApplication()
+        app.launchArguments = ["-ApplePersistenceIgnoreState", "YES", "-DefaultViewModeEnabled", "YES"]
+        app.open(source)
+        defer { app.terminate() }
+
+        let window = app.windows["source.md"].firstMatch
+        XCTAssertTrue(window.waitForExistence(timeout: 5))
+        let link = window.webViews.links["Target"].firstMatch
+        XCTAssertTrue(link.waitForExistence(timeout: 5))
+        link.click()
+        let accessSheet = window.sheets.firstMatch
+        XCTAssertTrue(accessSheet.waitForExistence(timeout: 5))
+        XCTAssertTrue(accessSheet.buttons["action-button-1"].exists)
+    }
+
+    @MainActor
     func testOpensSampleMarkLens() throws {
         let preview = XCUIApplication().openDocument(named: "sample", fileExtension: "md")
         defer { preview.terminate() }

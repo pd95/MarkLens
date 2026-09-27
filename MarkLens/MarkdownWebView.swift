@@ -27,8 +27,9 @@ struct MarkdownWebView: PlatformViewRepresentable {
     var resources: [HTMLResource]
     var customCSS: String
     var documentURL: URL?
-    var openDocument: (URL) async throws -> Void
+    var openDocument: (URL, Int?) async throws -> Void
     var openWikiLink: (String) -> Void
+    var openCurrentLine: (Int) -> Void
     var requestLocalDocumentAccess: (URL, String) -> Void
     var localImagePermissionDenied: (URL) -> Void
     var reloadRequest: Int
@@ -48,6 +49,7 @@ struct MarkdownWebView: PlatformViewRepresentable {
     @Binding var scrollPosition: DocumentScrollPosition
     var scrollTarget: DocumentScrollPosition
     var scrollRequest: Int
+    var highlightScrollRequest: Int?
     @Binding var confirmedScrollRequest: Int
     private var baseURL: URL? {
         documentURL
@@ -59,8 +61,9 @@ struct MarkdownWebView: PlatformViewRepresentable {
         resources: [HTMLResource] = [],
         customCSS: String = "",
         documentURL: URL? = nil,
-        openDocument: @escaping (URL) async throws -> Void = { _ in },
+        openDocument: @escaping (URL, Int?) async throws -> Void = { _, _ in },
         openWikiLink: @escaping (String) -> Void = { _ in },
+        openCurrentLine: @escaping (Int) -> Void = { _ in },
         requestLocalDocumentAccess: @escaping (URL, String) -> Void = { _, _ in },
         localImagePermissionDenied: @escaping (URL) -> Void = { _ in },
         reloadRequest: Int = 0,
@@ -80,6 +83,7 @@ struct MarkdownWebView: PlatformViewRepresentable {
         scrollPosition: Binding<DocumentScrollPosition> = .constant(.top),
         scrollTarget: DocumentScrollPosition = .top,
         scrollRequest: Int = 0,
+        highlightScrollRequest: Int? = nil,
         confirmedScrollRequest: Binding<Int> = .constant(0)
     ) {
         self.html = html
@@ -89,6 +93,7 @@ struct MarkdownWebView: PlatformViewRepresentable {
         self.documentURL = documentURL
         self.openDocument = openDocument
         self.openWikiLink = openWikiLink
+        self.openCurrentLine = openCurrentLine
         self.requestLocalDocumentAccess = requestLocalDocumentAccess
         self.localImagePermissionDenied = localImagePermissionDenied
         self.reloadRequest = reloadRequest
@@ -108,6 +113,7 @@ struct MarkdownWebView: PlatformViewRepresentable {
         self._scrollPosition = scrollPosition
         self.scrollTarget = scrollTarget
         self.scrollRequest = scrollRequest
+        self.highlightScrollRequest = highlightScrollRequest
         self._confirmedScrollRequest = confirmedScrollRequest
     }
 
@@ -500,6 +506,7 @@ struct MarkdownWebView: PlatformViewRepresentable {
             )
             let arguments: [String: Any] = [
                 "request": parent.scrollRequest,
+                "highlight": parent.highlightScrollRequest == parent.scrollRequest,
                 "line": parent.scrollTarget.sourceLine.map { $0 as Any } ?? NSNull(),
                 "progress": parent.scrollTarget.progress,
                 "anchor": parent.scrollTarget.anchorIdentity.map { $0 as Any } ?? NSNull(),
@@ -967,6 +974,28 @@ struct MarkdownWebView: PlatformViewRepresentable {
                 return
             }
 
+#if os(macOS)
+            if url.isFileURL,
+               let fragment = url.fragment,
+               fragment.hasPrefix("marklens-line="),
+               let line = Int(fragment.dropFirst("marklens-line=".count)), line > 0,
+               let documentURL = urlWithoutFragment(url) {
+                if documentURL.standardizedFileURL == parent.documentURL?.standardizedFileURL {
+                    parent.openCurrentLine(line)
+                } else {
+                    Task { @MainActor in
+                        do {
+                            try await parent.openDocument(documentURL, line)
+                        } catch {
+                            parent.requestLocalDocumentAccess(documentURL, error.localizedDescription)
+                        }
+                    }
+                }
+                decisionHandler(.cancel)
+                return
+            }
+#endif
+
             if isSameDocumentAnchor(url, in: webView) {
                 decisionHandler(.allow)
                 return
@@ -991,7 +1020,7 @@ struct MarkdownWebView: PlatformViewRepresentable {
                 }
                 Task { @MainActor in
                     do {
-                        try await parent.openDocument(documentURL)
+                        try await parent.openDocument(documentURL, nil)
                     } catch {
                         parent.requestLocalDocumentAccess(documentURL, error.localizedDescription)
                     }
@@ -1108,6 +1137,8 @@ struct MarkdownWebView: PlatformViewRepresentable {
                 .map(element => ({
                     element,
                     line: Number(element.dataset.marklensSourceLine),
+                    endLine: Number(element.dataset.marklensSourceEndLine),
+                    rangeFallback: element.dataset.marklensSourceRangeFallback !== undefined,
                     identity: identityForAnchor(element)
                 }))
                 .filter(anchor => Number.isFinite(anchor.line))
@@ -1124,6 +1155,45 @@ struct MarkdownWebView: PlatformViewRepresentable {
             let activeRestoration = null;
             let restorationTimeout = null;
             let restorationScrollY = null;
+            let highlight = null;
+            let highlightRequest = null;
+            let highlightTimeout = null;
+            const clearHighlight = () => {
+                highlight?.remove();
+                highlight = null;
+                highlightRequest = null;
+                clearTimeout(highlightTimeout);
+                highlightTimeout = null;
+            };
+            const highlightTarget = (target, request) => {
+                if (highlightRequest !== request) {
+                    clearHighlight();
+                    highlight = document.createElement('div');
+                    highlight.setAttribute('aria-hidden', 'true');
+                    highlight.style.position = 'absolute';
+                    highlight.style.pointerEvents = 'none';
+                    highlight.style.zIndex = '2147483647';
+                    highlight.style.background = 'rgba(255, 191, 0, 0.28)';
+                    highlight.style.borderLeft = '3px solid rgba(210, 130, 0, 0.9)';
+                    highlight.style.boxSizing = 'border-box';
+                    document.body.appendChild(highlight);
+                    highlightRequest = request;
+                    highlightTimeout = setTimeout(clearHighlight, 2200);
+                }
+                // Inline line markers have no width. Use their block's width, but
+                // only one rendered line of height so the destination is precise.
+                const marker = target.tagName === 'SPAN' && target.getAttribute('aria-hidden') === 'true';
+                const rect = target.getBoundingClientRect();
+                const block = marker ? target.parentElement : target;
+                const blockRect = block?.getBoundingClientRect() || rect;
+                const lineHeight = parseFloat(getComputedStyle(block || target).lineHeight);
+                highlight.style.top = `${scrollY + rect.top}px`;
+                highlight.style.left = `${blockRect.left || 0}px`;
+                highlight.style.width = `${Math.max(blockRect.width || rect.width || 0, 24)}px`;
+                highlight.style.height = `${marker
+                    ? (Number.isFinite(lineHeight) ? lineHeight : 24)
+                    : Math.max(3, Math.min(rect.height || 24, 80))}px`;
+            };
             const progress = () => {
                 const maximum = Math.max(0, document.documentElement.scrollHeight - innerHeight);
                 return maximum === 0 ? 0 : scrollY / maximum;
@@ -1202,20 +1272,39 @@ struct MarkdownWebView: PlatformViewRepresentable {
                 });
                 scheduleReport();
             });
-            anchors.forEach(anchor => visibilityObserver.observe(anchor));
+            // Fine-grained line targets are only needed for requested navigation.
+            // Keep position reporting on content blocks to avoid observing thousands
+            // of empty spans in large source files.
+            anchors.filter(anchor => anchor.getAttribute?.('aria-hidden') !== 'true')
+                .forEach(anchor => visibilityObserver.observe(anchor));
 
             const targetForLine = requestedLine => {
                 let lower = 0;
                 let upper = sourceAnchors.length;
                 while (lower < upper) {
                     const middle = Math.floor((lower + upper) / 2);
-                    if (sourceAnchors[middle].line <= requestedLine) {
+                    if (sourceAnchors[middle].line < requestedLine) {
                         lower = middle + 1;
                     } else {
                         upper = middle;
                     }
                 }
-                return sourceAnchors[Math.max(0, lower - 1)]?.element || null;
+                let selected = lower;
+                if (lower < sourceAnchors.length
+                    && sourceAnchors[lower].line === requestedLine) {
+                    while (selected + 1 < sourceAnchors.length
+                        && sourceAnchors[selected + 1].line === requestedLine) {
+                        selected += 1;
+                    }
+                    return sourceAnchors[selected].element;
+                }
+                for (let index = lower - 1; index >= 0; index -= 1) {
+                    const candidate = sourceAnchors[index];
+                    if (candidate.rangeFallback && candidate.endLine >= requestedLine) {
+                        return candidate.element;
+                    }
+                }
+                return sourceAnchors[lower]?.element || null;
             };
             const targetForAnchor = position => {
                 if (typeof position.anchor !== 'string') return null;
@@ -1283,16 +1372,23 @@ struct MarkdownWebView: PlatformViewRepresentable {
                     || (Number.isFinite(requestedLine) ? targetForLine(requestedLine) : null);
                 if (target) {
                     const requestedOffset = Number(activeRestoration.offset);
-                    const offset = Number.isFinite(requestedOffset) ? requestedOffset : 0;
+                    // Leave a little context above a followed line link. Other
+                    // restorations retain their exact saved viewport offset.
+                    const offset = activeRestoration.highlight === true
+                        ? 40 : (Number.isFinite(requestedOffset) ? requestedOffset : 0);
                     const top = scrollY + target.getBoundingClientRect().top - offset;
                     scrollTo(0, top);
+                    if (activeRestoration.highlight === true) {
+                        highlightTarget(target, activeRestoration.request);
+                    }
                 } else {
                     const maximum = Math.max(
                         0,
                         document.documentElement.scrollHeight - innerHeight
                     );
                     const requestedProgress = Math.min(
-                        Math.max(Number(activeRestoration.progress) || 0, 0),
+                        Math.max(Number.isFinite(requestedLine)
+                            ? 1 : Number(activeRestoration.progress) || 0, 0),
                         1
                     );
                     scrollTo(0, maximum * requestedProgress);
@@ -1349,6 +1445,7 @@ struct MarkdownWebView: PlatformViewRepresentable {
                     return null;
                 },
                 restore(position) {
+                    if (position.highlight !== true) clearHighlight();
                     activeRestoration = position;
                     clearTimeout(restorationTimeout);
                     restorationTimeout = setTimeout(cancelRestoration, 5000);

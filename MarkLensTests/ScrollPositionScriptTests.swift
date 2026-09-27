@@ -111,6 +111,87 @@ final class ScrollPositionScriptTests: XCTestCase {
         XCTAssertEqual(context.objectForKeyedSubscript("scrollY")?.toInt32(), 0)
     }
 
+    func testLineRequestUsesExactMarkerInsideMultilineContent() throws {
+        let context = try makeContext(anchors: [
+            anchor(tag: "P", text: "First line", line: 10, top: 100),
+            anchor(tag: "SPAN", text: "", line: 11, top: 150),
+            anchor(tag: "P", text: "Following block", line: 14, top: 300)
+        ])
+
+        context.evaluateScript("window.MarkLensScroll.restore({ request: 1, line: 11, progress: 0, anchor: null, offset: 0 });")
+
+        XCTAssertNil(context.exception)
+        XCTAssertEqual(context.objectForKeyedSubscript("scrollY")?.toInt32(), 150)
+    }
+
+    func testLineLinkBrieflyHighlightsExactInlineTarget() throws {
+        let context = try makeContext(anchors: [
+            anchor(tag: "P", text: "First line", line: 10, top: 100),
+            anchor(tag: "SPAN", text: "", line: 11, top: 150),
+            anchor(tag: "P", text: "Following block", line: 14, top: 300)
+        ])
+
+        context.evaluateScript("window.MarkLensScroll.restore({ request: 1, line: 11, progress: 0, anchor: null, offset: 0, highlight: true });")
+
+        XCTAssertNil(context.exception)
+        XCTAssertEqual(context.objectForKeyedSubscript("scrollY")?.toInt32(), 110)
+        XCTAssertEqual(context.evaluateScript("document.body.children.length")?.toInt32(), 1)
+        XCTAssertEqual(context.evaluateScript("document.body.children[0].style.top")?.toString(), "150px")
+        XCTAssertEqual(context.evaluateScript("document.body.children[0].style.height")?.toString(), "24px")
+
+        context.evaluateScript("pendingTimeouts.find(timer => timer.delay === 2200).callback();")
+        XCTAssertNil(context.exception)
+        XCTAssertEqual(context.evaluateScript("document.body.children.length")?.toInt32(), 0)
+    }
+
+    func testOrdinaryScrollRestorationDoesNotHighlight() throws {
+        let context = try makeContext(anchors: [
+            anchor(tag: "H2", text: "Destination", line: 40, top: 600)
+        ])
+
+        context.evaluateScript("window.MarkLensScroll.restore({ request: 1, line: 40, progress: 0, anchor: null, offset: 0 });")
+
+        XCTAssertNil(context.exception)
+        XCTAssertEqual(context.objectForKeyedSubscript("scrollY")?.toInt32(), 600)
+        XCTAssertEqual(context.evaluateScript("document.body.children.length")?.toInt32(), 0)
+    }
+
+    func testBlankLineUsesFollowingRenderedElement() throws {
+        let context = try makeContext(anchors: [
+            anchor(tag: "P", text: "Before blank", line: 10, top: 100),
+            anchor(tag: "H2", text: "After blank", line: 14, top: 300)
+        ])
+
+        context.evaluateScript("window.MarkLensScroll.restore({ request: 1, line: 12, progress: 0, anchor: null, offset: 0 });")
+
+        XCTAssertNil(context.exception)
+        XCTAssertEqual(context.objectForKeyedSubscript("scrollY")?.toInt32(), 300)
+    }
+
+    func testLinePastLastRenderedElementGoesToEnd() throws {
+        let context = try makeContext(anchors: [
+            anchor(tag: "P", text: "Last", line: 10, top: 100)
+        ])
+
+        context.evaluateScript("window.MarkLensScroll.restore({ request: 1, line: 99, progress: 0, anchor: null, offset: 0 });")
+
+        XCTAssertNil(context.exception)
+        XCTAssertEqual(context.objectForKeyedSubscript("scrollY")?.toInt32(), 1_900)
+    }
+
+    func testRenderedBlockWithoutIndividualLinesUsesItsRange() throws {
+        let context = try makeContext(anchors: [
+            anchor(tag: "DIV", text: "Diagram", line: 10, top: 100,
+                   endLine: 15, rangeFallback: true),
+            anchor(tag: "P", text: "After", line: 20, top: 300)
+        ])
+
+        context.evaluateScript("window.MarkLensScroll.restore({ request: 1, line: 12, progress: 0, anchor: null, offset: 0 });")
+
+        XCTAssertNil(context.exception)
+        XCTAssertEqual(context.objectForKeyedSubscript("scrollY")?.toInt32(), 100)
+    }
+
     func testUserScrollCancelsRestorationBeforeLaterLayoutChanges() throws {
         let context = try makeContext(anchors: [
             anchor(tag: "H2", text: "Destination", line: 40, top: 600)
@@ -338,9 +419,12 @@ final class ScrollPositionScriptTests: XCTestCase {
         text: String,
         line: Int,
         top: Int = 1_000,
-        height: Int = 20
+        height: Int = 20,
+        endLine: Int? = nil,
+        rangeFallback: Bool = false
     ) -> [String: Any] {
-        ["tag": tag, "text": text, "line": line, "top": top, "height": height]
+        ["tag": tag, "text": text, "line": line, "top": top, "height": height,
+         "endLine": endLine as Any? ?? NSNull(), "rangeFallback": rangeFallback]
     }
 
     private func makeContext(anchors: [[String: Any]]) throws -> JSContext {
@@ -355,20 +439,42 @@ final class ScrollPositionScriptTests: XCTestCase {
         var mockAnchors = anchorSpecs.map(spec => ({
             tagName: spec.tag,
             textContent: spec.text,
-            dataset: { marklensSourceLine: String(spec.line) },
+            dataset: {
+                marklensSourceLine: String(spec.line),
+                marklensSourceEndLine: spec.endLine === null ? undefined : String(spec.endLine),
+                marklensSourceRangeFallback: spec.rangeFallback ? '' : undefined
+            },
             top: spec.top,
-            parentElement: null,
+            parentElement: spec.tag === 'SPAN' ? {
+                getBoundingClientRect() {
+                    return { top: 100 - scrollY, bottom: 180 - scrollY, left: 10, width: 500, height: 80 };
+                }
+            } : null,
+            getAttribute(name) { return name === 'aria-hidden' && spec.tag === 'SPAN' ? 'true' : null; },
             getBoundingClientRect() {
                 return {
                     top: this.top - scrollY,
-                    bottom: this.top - scrollY + spec.height
+                    bottom: this.top - scrollY + spec.height,
+                    left: 10,
+                    width: spec.tag === 'SPAN' ? 0 : 500,
+                    height: spec.height
                 };
             }
         }));
+        var overlayChildren = [];
         var document = {
             documentElement: { scrollHeight: 2_000 },
+            body: { appendChild(element) { overlayChildren.push(element); }, get children() { return overlayChildren; } },
+            createElement() {
+                return {
+                    style: {},
+                    setAttribute() {},
+                    remove() { overlayChildren = overlayChildren.filter(child => child !== this); }
+                };
+            },
             querySelectorAll() { return mockAnchors; }
         };
+        function getComputedStyle() { return { lineHeight: '24px' }; }
         var window = globalThis;
         window.webkit = {
             messageHandlers: {

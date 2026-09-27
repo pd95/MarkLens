@@ -12,7 +12,9 @@ import AppKit
 
 @main
 struct MarkLensApp: App {
+#if !os(macOS)
     @StateObject private var localDocumentAccess = LocalDocumentAccess()
+#endif
 #if os(macOS)
     @StateObject private var releaseNotesCoordinator = ReleaseNotesCoordinator()
     @StateObject private var updateChecker = UpdateChecker()
@@ -34,7 +36,12 @@ struct MarkLensApp: App {
             newDocument: { MarkdownDocument(text: MarkdownDocument.starterText) }
         ) { file in
             ContentView(document: file.document, fileURL: file.fileURL)
+#if os(macOS)
+                .environmentObject(appDelegate.localDocumentAccess)
+                .environmentObject(appDelegate.lineNavigation)
+#else
                 .environmentObject(localDocumentAccess)
+#endif
 #if os(macOS)
                 .environmentObject(releaseNotesCoordinator)
                 .environmentObject(updateChecker)
@@ -114,7 +121,7 @@ struct MarkLensApp: App {
 
         Settings {
             MarkLensSettingsView()
-                .environmentObject(localDocumentAccess)
+                .environmentObject(appDelegate.localDocumentAccess)
                 .environmentObject(updateChecker)
         }
 #endif

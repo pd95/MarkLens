@@ -30,6 +30,7 @@ struct HTMLVisitor: MarkupVisitor {
     var currentColumnIndex = 0
     var headingIDCounts: [String: Int] = [:]
     var linkDepth = 0
+    var currentInlineLine: Int?
     var filteredHTMLFragmentCount = 0
     let sourceLineOffset: Int
     let plugins: HTMLPluginCoordinator
@@ -79,9 +80,11 @@ struct HTMLVisitor: MarkupVisitor {
         if paragraph.childCount == 1,
            let text = paragraph.child(at: 0) as? Text,
            let rendered = plugins.renderStandaloneParagraph(text.plainText) {
-            return addingSourceLine(to: rendered, for: paragraph)
+            return addingSourceLine(to: rendered, for: paragraph, rangeFallback: true)
         }
         var result: String
+        let previousInlineLine = currentInlineLine
+        currentInlineLine = paragraph.range.map { $0.lowerBound.line + sourceLineOffset }
         let shouldSkipParagraph = skipParagraphTags
         if shouldSkipParagraph {
             skipParagraphTags = false
@@ -99,6 +102,7 @@ struct HTMLVisitor: MarkupVisitor {
         } else {
             result += "</p>\n"
         }
+        currentInlineLine = previousInlineLine
         return result
     }
 
@@ -130,7 +134,9 @@ struct HTMLVisitor: MarkupVisitor {
     }
 
     mutating func visitLink(_ link: Link) -> String {
-        let destination = sanitizedURL(plugins.restoreLiteral(link.destination ?? ""), fallback: "#")
+        let rawDestination = plugins.restoreLiteral(link.destination ?? "")
+        let destination = (lineLinkedDestination(rawDestination)
+            ?? sanitizedURL(rawDestination, fallback: "#"))
             .encodedHTMLAttribute()
         var result = "<a href=\"\(destination)\">"
         linkDepth += 1
@@ -180,12 +186,19 @@ struct HTMLVisitor: MarkupVisitor {
         return "<code>\(code.encodedHTMLEntities())</code>"
     }
 
-    func visitLineBreak(_ lineBreak: LineBreak) -> String {
-        "<br>"
+    mutating func visitLineBreak(_ lineBreak: LineBreak) -> String {
+        "<br>\(nextInlineLineMarker())"
     }
 
-    func visitSoftBreak(_ softBreak: SoftBreak) -> String {
-        "\n"
+    mutating func visitSoftBreak(_ softBreak: SoftBreak) -> String {
+        "\n\(nextInlineLineMarker())"
+    }
+
+    private mutating func nextInlineLineMarker() -> String {
+        guard let currentInlineLine else { return "" }
+        let nextLine = currentInlineLine + 1
+        self.currentInlineLine = nextLine
+        return "<span data-marklens-source-line=\"\(nextLine)\" aria-hidden=\"true\"></span>"
     }
 
     func visitSymbolLink(_ symbolLink: SymbolLink) -> String {
@@ -194,20 +207,26 @@ struct HTMLVisitor: MarkupVisitor {
 
     mutating func visitHeading(_ heading: Heading) -> String {
         let identifier = uniqueHeadingID(for: heading)
+        let previousInlineLine = currentInlineLine
+        currentInlineLine = heading.range.map { $0.lowerBound.line + sourceLineOffset }
         var result = "<h\(heading.level) id=\"\(identifier.encodedHTMLAttribute())\"\(sourceLineAttribute(for: heading))>"
         for child in heading.children {
             result += visit(child)
         }
         result += "</h\(heading.level)>\n"
+        currentInlineLine = previousInlineLine
         return result
     }
 
     mutating func visitCodeBlock(_ codeBlock: CodeBlock) -> String {
         if let rendered = plugins.renderCodeBlock(codeBlock) {
             return addingSourceLine(
-                to: rendered,
+                to: addingCodeLineMarkers(to: rendered, for: codeBlock),
                 for: codeBlock,
-                selectionLine: codeContentStartLine(for: codeBlock)
+                selectionLine: codeContentStartLine(for: codeBlock),
+                rangeFallback: codeBlock.language?
+                    .split(whereSeparator: { $0.isWhitespace })
+                    .first?.lowercased() == "mermaid"
             )
         }
 
@@ -223,9 +242,11 @@ struct HTMLVisitor: MarkupVisitor {
         )
         var result = "<pre\(sourceAttribute)>"
             + "<code class=\"\(languageClass)\"\(metadata.htmlAttributes)>"
-        result += plugins.restoreLiteral(codeBlock.code)
-            .trimmingCharacters(in: .newlines)
-            .encodedHTMLEntities()
+        var source = plugins.restoreLiteral(codeBlock.code)
+        while source.last?.isNewline == true {
+            source.removeLast()
+        }
+        result += codeWithLineMarkers(source.encodedHTMLEntities(), for: codeBlock)
         result += "\n</code></pre>\n"
         return result
     }
@@ -278,7 +299,10 @@ struct HTMLVisitor: MarkupVisitor {
 
     mutating func visitHTMLBlock(_ html: HTMLBlock) -> String {
         let rawHTML = plugins.restoreLiteral(html.rawHTML)
-        var result = sanitizeRawHTML(rawHTML)
+        let sourceAttribute = sourceLineAttribute(for: html)
+        var result = sourceAttribute.isEmpty ? "" :
+            "<span\(sourceAttribute) data-marklens-source-range-fallback aria-hidden=\"true\"></span>"
+        result += sanitizeRawHTML(rawHTML)
         result += "\n"
         return result
     }
@@ -348,6 +372,8 @@ struct HTMLVisitor: MarkupVisitor {
     }
 
     mutating func visitTableCell(_ cell: Table.Cell) -> String {
+        let previousInlineLine = currentInlineLine
+        currentInlineLine = cell.range.map { $0.lowerBound.line + sourceLineOffset }
         var attributes = ""
         if cell.colspan > 1 {
             attributes += " colspan=\"\(cell.colspan)\""
@@ -367,6 +393,7 @@ struct HTMLVisitor: MarkupVisitor {
         currentColumnIndex += Int(cell.colspan)
 
         result += "</td>\n"
+        currentInlineLine = previousInlineLine
         return result
     }
 
@@ -395,12 +422,72 @@ struct HTMLVisitor: MarkupVisitor {
         return sourceLineCount > codeLineCount ? firstLine + 1 : firstLine
     }
 
+    private func addingCodeLineMarkers(to html: String, for codeBlock: CodeBlock) -> String {
+        guard codeBlock.language?.lowercased() != "mermaid",
+              let opening = html.range(of: "<code"),
+              let contentStart = html[opening.upperBound...].firstIndex(of: ">"),
+              let closing = html.range(of: "</code>", range: contentStart..<html.endIndex) else {
+            return html
+        }
+        let start = html.index(after: contentStart)
+        var result = html
+        result.replaceSubrange(start..<closing.lowerBound, with: codeWithLineMarkers(
+            String(html[start..<closing.lowerBound]), for: codeBlock
+        ))
+        return result
+    }
+
+    private func codeWithLineMarkers(_ html: String, for codeBlock: CodeBlock) -> String {
+        guard let firstLine = codeContentStartLine(for: codeBlock) else { return html }
+        let lines = codeBlock.code.components(separatedBy: "\n")
+        var result = ""
+        var lineIndex = 0
+        var inTag = false
+        if lines.first?.trimmingCharacters(in: .whitespaces).isEmpty == false {
+            result += "<span data-marklens-source-line=\"\(firstLine)\" aria-hidden=\"true\"></span>"
+        }
+        for character in html {
+            if character == "<" { inTag = true }
+            result.append(character)
+            if character == ">" { inTag = false }
+            if character == "\n" && !inTag {
+                lineIndex += 1
+                if lineIndex < lines.count,
+                   !lines[lineIndex].trimmingCharacters(in: .whitespaces).isEmpty {
+                    result += "<span data-marklens-source-line=\"\(firstLine + lineIndex)\" aria-hidden=\"true\"></span>"
+                }
+            }
+        }
+        return result
+    }
+
+    private func lineLinkedDestination(_ raw: String) -> String? {
+        guard !raw.contains("#"), !raw.contains("?"),
+              let colon = raw.lastIndex(of: ":"),
+              let line = Int(raw[raw.index(after: colon)...]), line > 0 else { return nil }
+        let path = String(raw[..<colon])
+        if let scheme = urlScheme(from: path), scheme.lowercased() != "file" {
+            return nil
+        }
+        let markdownExtensions = WikiLinkResolver.defaultMarkdownExtensions
+        guard markdownExtensions.contains(URL(fileURLWithPath: path).pathExtension.lowercased()) else {
+            return nil
+        }
+        let sanitized = sanitizedURL(path, fallback: "#")
+        guard sanitized != "#" else { return nil }
+        return sanitized + "#marklens-line=\(line)"
+    }
+
     private func addingSourceLine(
         to html: String,
         for markup: any Markup,
-        selectionLine: Int? = nil
+        selectionLine: Int? = nil,
+        rangeFallback: Bool = false
     ) -> String {
-        let attribute = sourceLineAttribute(for: markup, selectionLine: selectionLine)
+        var attribute = sourceLineAttribute(for: markup, selectionLine: selectionLine)
+        if rangeFallback && !attribute.isEmpty {
+            attribute += " data-marklens-source-range-fallback"
+        }
         guard attribute.isEmpty == false,
               let tagEnd = html.firstIndex(of: ">") else {
             return html

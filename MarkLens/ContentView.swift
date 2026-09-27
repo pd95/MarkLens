@@ -159,6 +159,7 @@ struct ContentView: View {
 #if os(macOS)
     @Environment(\.openDocument) private var openDocument
     @Environment(\.openWindow) private var openWindow
+    @EnvironmentObject private var lineNavigation: LineNavigationCoordinator
     @EnvironmentObject private var releaseNotesCoordinator: ReleaseNotesCoordinator
     @EnvironmentObject private var updateChecker: UpdateChecker
 #endif
@@ -191,6 +192,7 @@ struct ContentView: View {
     @State private var wikiResolutionGeneration = 0
     @State private var isResolvingWikiLink = false
     @State private var wikiResolutionWork: Task<WikiLinkResolution, Never>?
+    @State private var pendingRootLine: Int?
 #endif
     @State private var localDocumentError: String?
     @State private var outputRequest: RenderedDocumentOutputRequest?
@@ -215,6 +217,7 @@ struct ContentView: View {
     @State private var previewScrollTarget = DocumentScrollPosition.top
     @State private var sourceScrollTarget = DocumentScrollPosition.top
     @State private var previewScrollRequest = 0
+    @State private var previewHighlightRequest: Int?
     @State private var previewConfirmedScrollRequest = 0
     @State private var sourceScrollRequest = 0
     @State private var sourceSelectionLine: Int?
@@ -513,6 +516,14 @@ struct ContentView: View {
 #endif
             isHTMLFilteringInfoPresented = false
             resetPreviewNavigationState()
+#if os(macOS)
+            if let pendingRootLine, wikiNavigation.currentPage == nil {
+                self.pendingRootLine = nil
+                restorePreviewScroll(to: DocumentScrollPosition(
+                    sourceLine: pendingRootLine, progress: 0
+                ), highlight: true)
+            }
+#endif
         }
         .onAppear {
             applyRenderingPreferences()
@@ -530,6 +541,31 @@ struct ContentView: View {
         .onAppear {
             startExternalFileMonitor()
             restartWikiFileMonitor()
+        }
+        .onReceive(lineNavigation.$requests) { requests in
+            guard let fileURL,
+                  let request = requests[fileURL.standardizedFileURL] else { return }
+            Task { @MainActor in
+                guard let line = lineNavigation.takeRequest(for: fileURL, id: request.id) else {
+                    return
+                }
+                if wikiNavigation.currentPage != nil {
+                    pendingRootLine = line
+                }
+                while wikiNavigation.currentPage != nil {
+                    guard wikiNavigation.goBack(
+                        leavingScrollPosition: previewScrollPositionStore.position
+                    ) != nil else { break }
+                }
+                if wikiNavigation.currentPage != nil {
+                    pendingRootLine = nil
+                    localDocumentError = "Unable to return to the linked document."
+                    return
+                }
+                if pendingRootLine == nil {
+                    restorePreviewScroll(to: DocumentScrollPosition(sourceLine: line, progress: 0), highlight: true)
+                }
+            }
         }
         .onChange(of: fileURL) {
             externalFileMonitor?.stop()
@@ -576,6 +612,9 @@ struct ContentView: View {
                 chooseLocalAccessFolder()
             }
             Button("Cancel", role: .cancel) {
+                if let targetURL = pendingLocalAccessRequest?.targetURL {
+                    lineNavigation.cancel(for: targetURL)
+                }
                 pendingLocalAccessRequest = nil
             }
 #endif
@@ -648,6 +687,7 @@ struct ContentView: View {
             documentURL: displayedURL,
             openDocument: openLocalDocument,
             openWikiLink: openWikiLink,
+            openCurrentLine: openCurrentLine,
             requestLocalDocumentAccess: { url, errorDescription in
 #if os(macOS)
                 handleLocalDocumentOpenFailure(url, errorDescription: errorDescription)
@@ -685,6 +725,7 @@ struct ContentView: View {
             ),
             scrollTarget: previewScrollTarget,
             scrollRequest: previewScrollRequest,
+            highlightScrollRequest: previewHighlightRequest,
             confirmedScrollRequest: $previewConfirmedScrollRequest
         )
     }
@@ -1052,9 +1093,10 @@ struct ContentView: View {
     }
 
     @discardableResult
-    private func restorePreviewScroll(to position: DocumentScrollPosition) -> Int {
+    private func restorePreviewScroll(to position: DocumentScrollPosition, highlight: Bool = false) -> Int {
         previewScrollTarget = position
         previewScrollRequest += 1
+        previewHighlightRequest = highlight ? previewScrollRequest : nil
         WikiScrollDiagnostics.restoreRequested(
             location: displayedURL?.lastPathComponent ?? "untitled",
             request: previewScrollRequest,
@@ -1165,14 +1207,25 @@ struct ContentView: View {
 #endif
     }
 
-    private var openLocalDocument: (URL) async throws -> Void {
+    private var openLocalDocument: (URL, Int?) async throws -> Void {
 #if os(macOS)
-        { url in
+        { url, line in
+            if let line {
+                lineNavigation.enqueue(fileURL: url, line: line)
+            }
             try await openDocument(at: url)
         }
 #else
-        { _ in }
+        { _, _ in }
 #endif
+    }
+
+    private var openCurrentLine: (Int) -> Void {
+        { line in
+#if os(macOS)
+            restorePreviewScroll(to: DocumentScrollPosition(sourceLine: line, progress: 0), highlight: true)
+#endif
+        }
     }
 
     private var openWikiLink: (String) -> Void {
@@ -1348,13 +1401,21 @@ struct ContentView: View {
         panel.directoryURL = expectedFolder
 
         panel.begin { response in
-            guard response == .OK, let selectedFolder = panel.url else { return }
+            guard response == .OK, let selectedFolder = panel.url else {
+                if let targetURL = request.targetURL {
+                    lineNavigation.cancel(for: targetURL)
+                }
+                return
+            }
             let selectedFolderIsValid = request.isWikiFolder
                 ? (LocalDocumentAccess.contains(fileURL ?? expectedFolder, in: selectedFolder)
                     || LocalDocumentAccess.sameFolder(selectedFolder, expectedFolder))
                 : LocalDocumentAccess.sameFolder(selectedFolder, expectedFolder)
             guard selectedFolderIsValid else {
                 selectedFolder.stopAccessingSecurityScopedResource()
+                if let targetURL = request.targetURL {
+                    lineNavigation.cancel(for: targetURL)
+                }
                 localDocumentError = request.isWikiFolder
                     ? "Choose a folder that contains this Markdown document."
                     : "Choose the \(expectedFolder.lastPathComponent) folder to grant the requested access."
@@ -1369,6 +1430,7 @@ struct ContentView: View {
                         do {
                             try await openDocument(at: targetURL)
                         } catch {
+                            lineNavigation.cancel(for: targetURL)
                             localDocumentError = error.localizedDescription
                         }
                     }
@@ -1380,6 +1442,9 @@ struct ContentView: View {
                     }
                 }
             } catch {
+                if let targetURL = request.targetURL {
+                    lineNavigation.cancel(for: targetURL)
+                }
                 localDocumentError = error.localizedDescription
             }
         }
@@ -1387,10 +1452,12 @@ struct ContentView: View {
 
     private func handleLocalDocumentOpenFailure(_ url: URL, errorDescription: String) {
         guard isSupportedMarkdownDocument(url) else {
+            lineNavigation.cancel(for: url)
             localDocumentError = "\(url.lastPathComponent) is not a supported markdown document."
             return
         }
         if localDocumentAccess.hasAccess(to: url) {
+            lineNavigation.cancel(for: url)
             localDocumentError = errorDescription
         } else {
             pendingLocalAccessRequest = .document(url)

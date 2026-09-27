@@ -393,14 +393,72 @@ struct MarkdownPipelineHTMLRenderingTests {
         )
 
         #expect(document.html.contains(
-            "<p data-marklens-source-line=\"1\" data-marklens-source-end-line=\"2\">Soft line\ncontinues.</p>"
+            "<p data-marklens-source-line=\"1\" data-marklens-source-end-line=\"2\">Soft line\n<span data-marklens-source-line=\"2\" aria-hidden=\"true\"></span>continues.</p>"
         ))
         #expect(document.html.contains(
-            "<p data-marklens-source-line=\"4\" data-marklens-source-end-line=\"5\">Hard spaces.<br>next line.</p>"
+            "<p data-marklens-source-line=\"4\" data-marklens-source-end-line=\"5\">Hard spaces.<br><span data-marklens-source-line=\"5\" aria-hidden=\"true\"></span>next line.</p>"
         ))
         #expect(document.html.contains(
-            "<p data-marklens-source-line=\"7\" data-marklens-source-end-line=\"8\">Hard slash.<br>next again.</p>"
+            "<p data-marklens-source-line=\"7\" data-marklens-source-end-line=\"8\">Hard slash.<br><span data-marklens-source-line=\"8\" aria-hidden=\"true\"></span>next again.</p>"
         ))
+    }
+
+    @Test func localMarkdownLineLinksCarryTheirTargetThroughRendering() throws {
+        let input = """
+        [Nearby](notes.md:12) [Nested](folder/notes.markdown:3)
+        [File](file:///tmp/notes.md:27) [Remote](https://example.com/notes.md:12)
+        [Normal](notes.md) [Invalid](notes.md:0)
+        """
+        let document = try MarkdownPipeline().render(input: .string(input), context: PipelineContext())
+
+        #expect(document.html.contains("href=\"notes.md#marklens-line=12\""))
+        #expect(document.html.contains("href=\"folder/notes.markdown#marklens-line=3\""))
+        #expect(document.html.contains("href=\"file:///tmp/notes.md#marklens-line=27\""))
+        #expect(document.html.contains("href=\"https://example.com/notes.md:12\""))
+        #expect(document.html.contains("href=\"notes.md\""))
+        #expect(document.html.contains("href=\"notes.md#marklens-line=0\"") == false)
+    }
+
+    @Test func localMarkdownLineLinksEscapeAttributeCharacters() throws {
+        let input = "[Ampersand](<notes&draft.md:12>) [Quote](<notes\"draft.md:13>)"
+        let document = try MarkdownPipeline().render(input: .string(input), context: PipelineContext())
+
+        #expect(document.html.contains("href=\"notes&amp;draft.md#marklens-line=12\""))
+        #expect(document.html.contains("href=\"notes&quot;draft.md#marklens-line=13\""))
+        #expect(document.html.contains("onmouseover=") == false)
+    }
+
+    @Test func codeLinesExposeMarkersWithoutChangingTheirText() throws {
+        let input = "```swift\nlet first = 1\n\nlet third = 3\n```"
+        let document = try MarkdownPipeline().render(
+            input: .string(input), context: PipelineContext(enableCodeHighlighting: false)
+        )
+
+        #expect(document.html.contains("data-marklens-source-line=\"2\" aria-hidden=\"true\"></span>let first"))
+        #expect(document.html.contains("data-marklens-source-line=\"4\" aria-hidden=\"true\"></span>let third"))
+        #expect(document.html.contains("data-marklens-source-line=\"3\" aria-hidden=\"true\"") == false)
+    }
+
+    @Test func codeLineMarkersAccountForLeadingBlankCodeLines() throws {
+        let input = "```\n\nlet value = 1\n```"
+        let document = try MarkdownPipeline().render(
+            input: .string(input), context: PipelineContext(enableCodeHighlighting: false)
+        )
+
+        #expect(document.html.contains("data-marklens-source-line=\"3\" aria-hidden=\"true\"></span>let value"))
+        #expect(document.html.contains("data-marklens-source-line=\"2\" aria-hidden=\"true\"") == false)
+    }
+
+    @Test func highlightedCodeRetainsLineMarkers() throws {
+        let input = "```swift\nlet first = 1\nlet second = 2\n```"
+        let document = try MarkdownPipeline().render(
+            input: .string(input), context: PipelineContext()
+        )
+
+        #expect(document.html.contains("data-marklens-source-line=\"2\" aria-hidden=\"true\""))
+        #expect(document.html.contains("data-marklens-source-line=\"3\" aria-hidden=\"true\""))
+        #expect(document.html.contains("let first"))
+        #expect(document.html.contains("let second"))
     }
 
     @Test func rendersHeadingAnchorsWithDeduping() throws {
@@ -445,6 +503,16 @@ struct MarkdownPipelineHTMLRenderingTests {
         )
 
         #expect(document.html.contains("id=\"heading\" data-marklens-source-line=\"4\">Heading</h1>"))
+    }
+
+    @Test func multilineParagraphMarkersIncludeFrontMatterOffset() throws {
+        let input = "---\r\ntitle: Offset\r\n---\r\nFirst line\r\nSecond line"
+        let document = try MarkdownPipeline().render(
+            input: .string(input), context: PipelineContext()
+        )
+
+        #expect(document.html.contains("<p data-marklens-source-line=\"4\""))
+        #expect(document.html.contains("<span data-marklens-source-line=\"5\" aria-hidden=\"true\"></span>Second line"))
     }
 
     @Test func rendersBlockQuoteAndRule() throws {
@@ -512,7 +580,9 @@ struct MarkdownPipelineHTMLRenderingTests {
         let context = PipelineContext(enableCodeHighlighting: false)
         let document = try pipeline.render(input: .string(input), context: context)
 
-        #expect(document.html.contains("data-code-language-source=\"explicit\">\(code)\n</code>"))
+        #expect(document.html.contains("data-code-language-source=\"explicit\">"))
+        #expect(document.html.contains("let value = 1\n"))
+        #expect(document.html.contains("identifier-without-soft-wrap-opportunities\n</code>"))
         #expect(document.html.contains("break-after: avoid-page"))
         #expect(document.html.contains("page-break-after: avoid"))
         #expect(document.html.contains("break-before: avoid-page"))
@@ -648,6 +718,7 @@ struct MarkdownPipelineHTMLRenderingTests {
         )
 
         #expect(document.html.contains("data-marklens-source-line=\"9000\"") == false)
+        #expect(document.html.contains("data-marklens-source-line=\"1\" data-marklens-source-range-fallback"))
         #expect(document.html.contains("<p>Raw</p>"))
     }
 

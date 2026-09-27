@@ -97,6 +97,7 @@
 		17FBBD892F0831ED00BEAA3E /* Exceptions for "MarkLens" folder in "MarkLens" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
+				Resources/Info-macOS.plist,
 				Resources/Info.plist,
 				"WebResources/preview-search.js",
 			);
@@ -611,6 +612,7 @@
 				ENABLE_USER_SELECTED_FILES = readwrite;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = MarkLens/Resources/Info.plist;
+				"INFOPLIST_FILE[sdk=macosx*]" = "MarkLens/Resources/Info-macOS.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = MarkLens;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
@@ -663,6 +665,7 @@
 				ENABLE_USER_SELECTED_FILES = readwrite;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = MarkLens/Resources/Info.plist;
+				"INFOPLIST_FILE[sdk=macosx*]" = "MarkLens/Resources/Info-macOS.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = MarkLens;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;

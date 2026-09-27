@@ -41,6 +41,14 @@ struct MarkLensApp: App {
         ) { file in
             ContentView(document: file.document, fileURL: file.fileURL)
 #if os(macOS)
+                .background {
+                    DocumentWindowPlacement(
+                        fileURL: file.fileURL,
+                        isUntitled: file.document.filename == nil,
+                        placement: appDelegate.windowPlacement
+                    )
+                    .frame(width: 0, height: 0)
+                }
                 .environmentObject(appDelegate.localDocumentAccess)
                 .environmentObject(appDelegate.lineNavigation)
                 .environmentObject(appDelegate.documentTabs)

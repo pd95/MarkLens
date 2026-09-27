@@ -10,6 +10,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     let lineNavigation = LineNavigationCoordinator()
     let documentTabs = DocumentTabCoordinator()
     let localDocumentAccess = LocalDocumentAccess()
+    let windowPlacement = WindowPlacementCoordinator()
     
     // MARK: - NSApplicationDelegate
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {

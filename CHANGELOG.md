@@ -2,6 +2,7 @@
 
 ## 1.8.1
 
+- Remembered macOS document window size and position per file, including a fallback for new files.
 - Improved YAML frontmatter parsing to preserve standard scalar and collection semantics while making wiki links embedded in text values clickable.
 - Disabled smart punctuation, automatic correction, completion, and text detection in Markdown source editors so typed source remains literal.
 - Fixed document autosaves and external-file refreshes to use the native document lifecycle without false conflict prompts, reload loops from unchanged file events, or silently discarded Update and Cancel choices.

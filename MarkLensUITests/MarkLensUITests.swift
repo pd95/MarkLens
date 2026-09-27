@@ -14,6 +14,52 @@ final class MarkLensUITests: XCTestCase {
     }
 
     @MainActor
+    func testDocumentWindowPlacementSurvivesRelaunch() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("MarkLensPlacementUITest-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let documentURL = directory.appendingPathComponent("placement.md")
+        try "# Placement".write(to: documentURL, atomically: true, encoding: .utf8)
+
+        let app = XCUIApplication()
+        app.launchArguments = ["-ApplePersistenceIgnoreState", "YES"]
+        app.open(documentURL)
+        defer { app.terminate() }
+
+        let window = app.windows["placement.md"].firstMatch
+        XCTAssertTrue(window.waitForExistence(timeout: 5))
+        let original = window.frame
+        let resizeHandle = window.coordinate(withNormalizedOffset: CGVector(dx: 1, dy: 1))
+            .withOffset(CGVector(dx: -3, dy: -3))
+        resizeHandle.press(
+            forDuration: 0.2,
+            thenDragTo: resizeHandle.withOffset(CGVector(dx: -80, dy: -60))
+        )
+        let resized = window.frame
+        XCTAssertGreaterThan(abs(resized.width - original.width), 20)
+        XCTAssertGreaterThan(abs(resized.height - original.height), 20)
+        let titleBar = window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.02))
+        titleBar.press(
+            forDuration: 0.1,
+            thenDragTo: titleBar.withOffset(CGVector(dx: 45, dy: 35))
+        )
+        let expected = window.frame
+        XCTAssertGreaterThan(abs(expected.minX - resized.minX), 20)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+        app.terminate()
+
+        app.open(documentURL)
+        let reopened = app.windows["placement.md"].firstMatch
+        XCTAssertTrue(reopened.waitForExistence(timeout: 5))
+        let actual = reopened.frame
+        XCTAssertEqual(actual.minX, expected.minX, accuracy: 12)
+        XCTAssertEqual(actual.minY, expected.minY, accuracy: 12)
+        XCTAssertEqual(actual.width, expected.width, accuracy: 12)
+        XCTAssertEqual(actual.height, expected.height, accuracy: 12)
+    }
+
+    @MainActor
     func testLocalMarkdownLinkOffersNativeNewTabAction() throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("MarkLensTabUITest-\(UUID().uuidString)", isDirectory: true)

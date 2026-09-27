@@ -3,6 +3,22 @@ import XCTest
 
 @MainActor
 final class WikiNavigationModelTests: XCTestCase {
+    func testHistoryRestoresTheAuthorizedRootForEachVisitedFolder() async {
+        let model = makeModel()
+        let firstRoot = URL(fileURLWithPath: "/wiki/one")
+        let secondRoot = URL(fileURLWithPath: "/wiki/two")
+        model.navigate(to: firstRoot.appendingPathComponent("a.md"), wikiRoot: firstRoot)
+        await waitForLoad(model)
+        model.navigate(to: secondRoot.appendingPathComponent("b.md"), wikiRoot: secondRoot)
+        await waitForLoad(model)
+        XCTAssertEqual(model.wikiRootURL, secondRoot)
+
+        model.goBack()
+        XCTAssertEqual(model.wikiRootURL, firstRoot)
+        model.goForward()
+        XCTAssertEqual(model.wikiRootURL, secondRoot)
+    }
+
     func testBackForwardRootRestorationAndBranching() async throws {
         let model = makeModel()
         let root = URL(fileURLWithPath: "/wiki")

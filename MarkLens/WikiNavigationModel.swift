@@ -55,6 +55,7 @@ struct WikiHistoryNavigation: Equatable {
 private struct WikiHistoryEntry {
     let location: WikiLocation
     let scrollPosition: DocumentScrollPosition
+    let wikiRootURL: URL?
 }
 
 private struct PendingWikiRefresh {
@@ -171,7 +172,8 @@ final class WikiNavigationModel: ObservableObject {
             case .success(let page):
                 self.backStack.append(WikiHistoryEntry(
                     location: self.current,
-                    scrollPosition: leavingScrollPosition
+                    scrollPosition: leavingScrollPosition,
+                    wikiRootURL: self.wikiRootURL
                 ))
                 self.current = .page(page.url)
                 self.currentPage = page
@@ -218,7 +220,7 @@ final class WikiNavigationModel: ObservableObject {
             switch result {
             case .success(let page):
                 let rootEntry = self.backStack.first { $0.location == .root }
-                    ?? WikiHistoryEntry(location: .root, scrollPosition: .top)
+                    ?? WikiHistoryEntry(location: .root, scrollPosition: .top, wikiRootURL: nil)
                 self.current = .page(page.url)
                 self.currentPage = page
                 self.backStack = [rootEntry]
@@ -318,10 +320,12 @@ final class WikiNavigationModel: ObservableObject {
         errorDescription = nil
         forwardStack.append(WikiHistoryEntry(
             location: current,
-            scrollPosition: leavingScrollPosition
+            scrollPosition: leavingScrollPosition,
+            wikiRootURL: wikiRootURL
         ))
         current = destination.location
         currentPage = page(for: destination.location)
+        wikiRootURL = destination.wikiRootURL
         trimHistory()
         prunePageCache()
         updateHistoryState()
@@ -346,10 +350,12 @@ final class WikiNavigationModel: ObservableObject {
         errorDescription = nil
         backStack.append(WikiHistoryEntry(
             location: current,
-            scrollPosition: leavingScrollPosition
+            scrollPosition: leavingScrollPosition,
+            wikiRootURL: wikiRootURL
         ))
         current = destination.location
         currentPage = page(for: destination.location)
+        wikiRootURL = destination.wikiRootURL
         trimHistory()
         prunePageCache()
         updateHistoryState()

@@ -192,6 +192,6 @@ final class LocalDocumentAccess: ObservableObject {
             return URL(fileURLWithPath: String(cString: directory), isDirectory: true)
         }
 #endif
-        return FileManager.default.homeDirectoryForCurrentUser
+        return URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
     }
 }

@@ -7,7 +7,7 @@
 - Link directly to a Markdown source line, including through `marklens://open` links from other apps. MarkLens scrolls to the rendered line.
 - Reopen document windows at their previous size and position, adjusted to fit smaller displays.
 - Find document navigation in its own Settings tab and linked-image controls in Content & Privacy. The Custom CSS editor now fills the available space in Appearance.
-- Fixed misplaced link context menus and clarified Settings controls.
+- Fixed misplaced link context menus, clarified Settings controls, and added separate Help commands for current release notes and the full changelog.
 
 ## 1.8.1
 

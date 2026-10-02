@@ -33,6 +33,10 @@ enum ReleaseChangelog {
         )
     }
 
+    static func latestChanges(in markdown: String) -> String? {
+        sections(in: markdown).first?.markdown
+    }
+
     private static func sections(in markdown: String) -> [Section] {
         let lines = markdown.components(separatedBy: .newlines)
         var sections: [Section] = []

@@ -284,7 +284,8 @@ final class MarkLensUITests: XCTestCase {
 
         preview.verifyInstalledReleaseNotes(includesPreviousRelease: true)
         capture(app, name: "installed-release-notes-window")
-        preview.openInstalledReleaseNotesFromHelp()
+        preview.verifyFullChangelogLinkExists()
+        preview.openChangelogFromHelp()
         preview.verifyCompleteChangelogCanScrollToOldestChange()
     }
 
@@ -303,7 +304,9 @@ final class MarkLensUITests: XCTestCase {
         )
         defer { preview.terminate() }
 
-        preview.openInstalledReleaseNotesFromHelp()
+        preview.openReleaseNotesFromHelp()
+        preview.verifyCurrentReleaseNotes(version: "1.7.0")
+        preview.openChangelogFromHelp()
         preview.verifyCompleteChangelog()
     }
 
@@ -331,7 +334,7 @@ final class MarkLensUITests: XCTestCase {
     }
 
     @MainActor
-    func testDebugHelpShowsCompleteBundledChangelog() throws {
+    func testDebugHelpShowsCurrentReleaseNotesAndChangelog() throws {
         let app = XCUIApplication()
         let preview = app.openDocument(named: "sample", fileExtension: "md")
         defer { preview.terminate() }
@@ -340,7 +343,9 @@ final class MarkLensUITests: XCTestCase {
             preview.installedReleaseNotesWindow.exists,
             "Expected the development changelog to remain opt-in."
         )
-        preview.openInstalledReleaseNotesFromHelp()
+        preview.openReleaseNotesFromHelp()
+        preview.verifyCurrentReleaseNotes(version: "1.9.0")
+        preview.openChangelogFromHelp()
         preview.verifyCompleteChangelog()
         capture(app, name: "debug-complete-changelog-window")
     }
@@ -618,12 +623,34 @@ private struct MarkLensAppHandle {
         }
     }
 
-    func openInstalledReleaseNotesFromHelp() {
+    func openReleaseNotesFromHelp() {
         let helpMenu = app.menuBars.menuBarItems["Help"].firstMatch
         helpMenu.click()
-        let menuItem = helpMenu.menus.menuItems["Complete Changelog"].firstMatch
-        XCTAssertTrue(menuItem.waitForExistence(timeout: 5), "Expected the Complete Changelog Help command.")
+        let menuItem = helpMenu.menus.menuItems["Release Notes"].firstMatch
+        XCTAssertTrue(menuItem.waitForExistence(timeout: 5), "Expected the Release Notes Help command.")
         menuItem.click()
+    }
+
+    func openChangelogFromHelp() {
+        let helpMenu = app.menuBars.menuBarItems["Help"].firstMatch
+        helpMenu.click()
+        let menuItem = helpMenu.menus.menuItems["Changelog"].firstMatch
+        XCTAssertTrue(menuItem.waitForExistence(timeout: 5), "Expected the Changelog Help command.")
+        menuItem.click()
+    }
+
+    func verifyFullChangelogLinkExists() {
+        let button = installedReleaseNotesWindow.descendants(matching: .any)[
+            "viewFullChangelogButton"
+        ].firstMatch
+        XCTAssertTrue(button.waitForExistence(timeout: 5), "Expected a link to the full changelog.")
+    }
+
+    func verifyCurrentReleaseNotes(version: String) {
+        let notesWindow = installedReleaseNotesWindow
+        XCTAssertTrue(notesWindow.waitForExistence(timeout: 5))
+        XCTAssertTrue(notesWindow.staticTexts[version].firstMatch.waitForExistence(timeout: 5))
+        XCTAssertFalse(notesWindow.staticTexts["1.8.1"].firstMatch.exists)
     }
 
     func verifyCompleteChangelog() {
@@ -665,7 +692,7 @@ private struct MarkLensAppHandle {
             "Improved Quick Look preview rendering and shared app/extension resources."
         ].firstMatch
         XCTAssertTrue(
-            oldestChange.waitForExistence(timeout: 5),
+            oldestChange.waitForExistence(timeout: 10),
             "Expected the oldest bundled changelog entry to be rendered."
         )
 

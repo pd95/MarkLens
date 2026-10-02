@@ -1,4 +1,5 @@
 #if os(macOS)
+import AppKit
 import Combine
 import Foundation
 import SwiftUI
@@ -53,6 +54,7 @@ final class ReleaseNotesCoordinator: ObservableObject {
     private let currentReleaseTag: String?
     private let defaults: UserDefaults
     private let automaticNotes: InstalledReleaseNotes?
+    private let releaseNotes: InstalledReleaseNotes
     private let fullChangelogNotes: InstalledReleaseNotes
     private var automaticPresentationClaimed = false
     private var presentedNotesAcknowledgeCurrentRelease = false
@@ -81,21 +83,33 @@ final class ReleaseNotesCoordinator: ObservableObject {
             markdown: Self.displayedChangelog(changelog),
             showsFullChangelog: true
         )
+        let currentMarkdown = changelog.flatMap { changelog in
+            if ReleaseVersion(requestedReleaseTag) != nil {
+                return ReleaseChangelog.changes(in: changelog, for: requestedReleaseTag)
+            }
+            return ReleaseChangelog.latestChanges(in: changelog)
+        }
+        let releaseNotes = InstalledReleaseNotes(
+            releaseTag: requestedReleaseTag,
+            previousReleaseTag: nil,
+            markdown: currentMarkdown ?? "Release notes are unavailable."
+        )
 
         self.defaults = defaults
+        self.releaseNotes = releaseNotes
         self.fullChangelogNotes = fullChangelogNotes
         #if DEBUG
         if requestedReleaseTag == "local" {
             self.currentReleaseTag = nil
             automaticNotes = nil
-            notes = fullChangelogNotes
+            notes = releaseNotes
             return
         }
         #endif
         guard ReleaseVersion(requestedReleaseTag) != nil else {
             self.currentReleaseTag = nil
             automaticNotes = nil
-            notes = fullChangelogNotes
+            notes = releaseNotes
             return
         }
         self.currentReleaseTag = requestedReleaseTag
@@ -177,6 +191,11 @@ final class ReleaseNotesCoordinator: ObservableObject {
         presentedNotesAcknowledgeCurrentRelease = false
     }
 
+    func presentReleaseNotes() {
+        notes = releaseNotes
+        presentedNotesAcknowledgeCurrentRelease = false
+    }
+
     func acknowledgeCurrentRelease() {
         guard presentedNotesAcknowledgeCurrentRelease,
               let currentReleaseTag else {
@@ -232,16 +251,29 @@ final class ReleaseNotesCoordinator: ObservableObject {
 
 struct InstalledReleaseNotesView: View {
     let notes: InstalledReleaseNotes
+    let showFullChangelog: () -> Void
 
     var body: some View {
-        ReleaseNotesContentView(
-            markdown: notes.markdown,
-            contentIdentity: notes.contentIdentity,
-            accessibilityLabel: releaseNotesAccessibilityLabel
-        )
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding(.horizontal, 24)
-        .padding(.vertical, 12)
+        VStack(spacing: 0) {
+            ReleaseNotesContentView(
+                markdown: notes.markdown,
+                contentIdentity: notes.contentIdentity,
+                accessibilityLabel: releaseNotesAccessibilityLabel
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            if notes.showsFullChangelog == false {
+                HStack {
+                    Button("View Full Changelog", action: showFullChangelog)
+                        .buttonStyle(.link)
+                        .accessibilityIdentifier("viewFullChangelogButton")
+                    Spacer()
+                }
+                .padding(.horizontal, 32)
+                .padding(.bottom, 16)
+            }
+        }
+        .background(ReleaseNotesWindowAppearance().frame(width: 0, height: 0))
         .frame(minWidth: 520, minHeight: 520)
     }
 
@@ -271,7 +303,38 @@ struct InstalledReleaseNotesView: View {
 
                 - Improved performance for very large Markdown documents.
                 """
-        )
+        ),
+        showFullChangelog: {}
     )
+}
+
+private struct ReleaseNotesWindowAppearance: NSViewRepresentable {
+    func makeNSView(context: Context) -> ReleaseNotesWindowAppearanceView {
+        ReleaseNotesWindowAppearanceView(frame: .zero)
+    }
+
+    func updateNSView(_ view: ReleaseNotesWindowAppearanceView, context: Context) {
+        view.configureWindow()
+    }
+}
+
+private final class ReleaseNotesWindowAppearanceView: NSView {
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        configureWindow()
+    }
+
+    func configureWindow() {
+        guard let window else { return }
+        if window.styleMask.contains(.fullSizeContentView) == false {
+            window.styleMask.insert(.fullSizeContentView)
+        }
+        if window.titlebarAppearsTransparent == false {
+            window.titlebarAppearsTransparent = true
+        }
+        if window.titlebarSeparatorStyle != .none {
+            window.titlebarSeparatorStyle = .none
+        }
+    }
 }
 #endif

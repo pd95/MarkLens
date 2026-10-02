@@ -13,7 +13,9 @@ struct ReleaseNotesContentView: View {
         }
 
         body {
-            margin: 0 0.5rem 0.75rem 0;
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0 32px 24px;
             font-size: 0.875rem;
         }
 

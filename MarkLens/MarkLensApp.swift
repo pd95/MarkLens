@@ -109,7 +109,9 @@ struct MarkLensApp: App {
 #if os(macOS)
         Window("MarkLens Release Notes", id: ReleaseNotesCoordinator.windowID) {
             if let notes = releaseNotesCoordinator.notes {
-                InstalledReleaseNotesView(notes: notes)
+                InstalledReleaseNotesView(notes: notes) {
+                    releaseNotesCoordinator.presentFullChangelog()
+                }
                     .onAppear {
                         releaseNotesCoordinator.acknowledgeCurrentRelease()
                     }
@@ -124,6 +126,7 @@ struct MarkLensApp: App {
                 .frame(minWidth: 520, minHeight: 520)
             }
         }
+        .windowToolbarStyle(.unified)
         .defaultSize(width: 620, height: 620)
         .defaultLaunchBehavior(.suppressed)
         .restorationBehavior(.disabled)
@@ -163,10 +166,17 @@ private struct ReleaseNotesCommands: Commands {
     var body: some Commands {
         CommandGroup(after: .help) {
             Button {
+                coordinator.presentReleaseNotes()
+                openWindow(id: ReleaseNotesCoordinator.windowID)
+            } label: {
+                Label("Release Notes", systemImage: "sparkles")
+            }
+
+            Button {
                 coordinator.presentFullChangelog()
                 openWindow(id: ReleaseNotesCoordinator.windowID)
             } label: {
-                Label("Complete Changelog", systemImage: "text.book.closed")
+                Label("Changelog", systemImage: "text.book.closed")
             }
         }
     }

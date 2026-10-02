@@ -49,25 +49,32 @@ final class ReleaseNotesCoordinatorTests: XCTestCase {
         XCTAssertFalse(markdown.contains("Old changes"))
     }
 
-    func testHelpPresentationUsesFullChangelogWithoutAcknowledgingUpgrade() throws {
+    func testHelpPresentationUsesCurrentReleaseWithoutAcknowledgingUpgrade() throws {
         let defaults = makeDefaults()
         defaults.set("v1.1.0", forKey: ReleaseNotesCoordinator.lastAcknowledgedReleaseKey)
         let coordinator = makeCoordinator(current: "v1.3.0", defaults: defaults)
 
-        coordinator.presentFullChangelog()
+        coordinator.presentReleaseNotes()
 
-        XCTAssertTrue(coordinator.notes?.showsFullChangelog == true)
+        XCTAssertFalse(coordinator.notes?.showsFullChangelog == true)
         XCTAssertNil(coordinator.notes?.previousReleaseTag)
-        let fullChangelog = try XCTUnwrap(coordinator.notes?.markdown)
-        XCTAssertTrue(fullChangelog.contains("Current changes"))
-        XCTAssertTrue(fullChangelog.contains("Intermediate changes"))
-        XCTAssertTrue(fullChangelog.contains("Old changes"))
+        let releaseNotes = try XCTUnwrap(coordinator.notes?.markdown)
+        XCTAssertTrue(releaseNotes.contains("Current changes"))
+        XCTAssertFalse(releaseNotes.contains("Intermediate changes"))
+        XCTAssertFalse(releaseNotes.contains("Old changes"))
         coordinator.acknowledgeCurrentRelease()
         XCTAssertEqual(
             defaults.string(forKey: ReleaseNotesCoordinator.lastAcknowledgedReleaseKey),
             "v1.1.0",
-            "Opening the full changelog must not acknowledge pending upgrade notes."
+            "Opening release notes from Help must not acknowledge pending upgrade notes."
         )
+
+        coordinator.presentFullChangelog()
+        XCTAssertTrue(coordinator.notes?.showsFullChangelog == true)
+        let fullChangelog = try XCTUnwrap(coordinator.notes?.markdown)
+        XCTAssertTrue(fullChangelog.contains("Current changes"))
+        XCTAssertTrue(fullChangelog.contains("Intermediate changes"))
+        XCTAssertTrue(fullChangelog.contains("Old changes"))
 
         XCTAssertTrue(coordinator.claimAutomaticPresentation())
         XCTAssertFalse(coordinator.notes?.showsFullChangelog == true)
@@ -144,7 +151,7 @@ final class ReleaseNotesCoordinatorTests: XCTestCase {
         XCTAssertTrue(changelog.contains("## 1.8.1"))
     }
 
-    func testLocalDevelopmentBuildExposesFullChangelogWithoutPresentingAutomatically() {
+    func testLocalDevelopmentBuildShowsLatestReleaseNotesWithoutPresentingAutomatically() {
         let coordinator = ReleaseNotesCoordinator(
             currentReleaseTag: "local",
             defaults: makeDefaults(),
@@ -152,14 +159,16 @@ final class ReleaseNotesCoordinatorTests: XCTestCase {
             changelogLoader: { Self.changelog }
         )
 
-        XCTAssertEqual(
-            coordinator.notes?.markdown,
-            Self.changelog.replacingOccurrences(of: "# Changelog\n\n", with: "")
-        )
-        XCTAssertTrue(coordinator.notes?.showsFullChangelog == true)
+        XCTAssertTrue(coordinator.notes?.markdown.contains("Current changes") == true)
+        XCTAssertFalse(coordinator.notes?.markdown.contains("Intermediate changes") == true)
+        XCTAssertFalse(coordinator.notes?.showsFullChangelog == true)
         XCTAssertNil(coordinator.notes?.previousReleaseTag)
         XCTAssertFalse(coordinator.shouldPresentAutomatically)
         XCTAssertFalse(coordinator.claimAutomaticPresentation())
+
+        coordinator.presentFullChangelog()
+        XCTAssertTrue(coordinator.notes?.showsFullChangelog == true)
+        XCTAssertTrue(coordinator.notes?.markdown.contains("Old changes") == true)
     }
 
     private func makeCoordinator(

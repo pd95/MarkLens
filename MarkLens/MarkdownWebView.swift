@@ -39,6 +39,7 @@ struct MarkdownWebView: PlatformViewRepresentable {
     @Binding var findMatchCount: Int
     @Binding var findCurrentIndex: Int
     var findTerm: String
+    var findIsPresented: Bool
     var findRequest: Int
     var findBackwards: Bool
     var findAnchorRequest: Int
@@ -73,6 +74,7 @@ struct MarkdownWebView: PlatformViewRepresentable {
         findMatchCount: Binding<Int> = .constant(0),
         findCurrentIndex: Binding<Int> = .constant(0),
         findTerm: String = "",
+        findIsPresented: Bool = false,
         findRequest: Int = 0,
         findBackwards: Bool = false,
         findAnchorRequest: Int = 0,
@@ -103,6 +105,7 @@ struct MarkdownWebView: PlatformViewRepresentable {
         self._findMatchCount = findMatchCount
         self._findCurrentIndex = findCurrentIndex
         self.findTerm = findTerm
+        self.findIsPresented = findIsPresented
         self.findRequest = findRequest
         self.findBackwards = findBackwards
         self.findAnchorRequest = findAnchorRequest
@@ -271,6 +274,7 @@ struct MarkdownWebView: PlatformViewRepresentable {
         var isPageReady = false
         var latestContentVersion: ContentVersion?
         var latestFindTerm = ""
+        var latestFindIsPresented = false
         var latestFindRequest = 0
         var latestFindAnchorRequest = 0
         var latestCustomCSS: String?
@@ -365,6 +369,7 @@ struct MarkdownWebView: PlatformViewRepresentable {
             let markdownChanged = newContentVersion != latestContentVersion
             let findTermChanged = parent.findTerm != latestFindTerm
             let findChanged = findTermChanged || parent.findRequest != latestFindRequest
+            let findClosed = latestFindIsPresented && !parent.findIsPresented
             let findAnchorChanged = parent.findAnchorRequest != latestFindAnchorRequest
             let customCSSChanged = parent.customCSS != latestCustomCSS
             let scrollChanged = needsScrollRestoration
@@ -383,13 +388,21 @@ struct MarkdownWebView: PlatformViewRepresentable {
                 isPageReady = false
                 isSearchInstalled = false
                 searchGeneration += 1
+                latestFindIsPresented = parent.findIsPresented
                 reloadPage(animated: scrollChanged)
                 latestContentVersion = newContentVersion
             } else if isPageReady {
                 if customCSSChanged {
                     applyCustomCSS()
                 }
-                if findAnchorChanged {
+                latestFindIsPresented = parent.findIsPresented
+                if findClosed {
+                    updateSearch(command: "finish", completion: restoreAfterSearch)
+                    searchUpdateScheduled = true
+                    latestFindTerm = parent.findTerm
+                    latestFindRequest = parent.findRequest
+                    latestFindAnchorRequest = parent.findAnchorRequest
+                } else if findAnchorChanged {
                     latestFindAnchorRequest = parent.findAnchorRequest
                     if findChanged {
                         updateSearch(
@@ -720,6 +733,11 @@ struct MarkdownWebView: PlatformViewRepresentable {
             webView.evaluateJavaScript("window.MarkLensSearch.run(\(jsonString));") { [weak self] result, _ in
                 guard let self, generation == self.searchGeneration else { return }
 
+#if os(macOS)
+                if command == "finish" {
+                    webView.window?.makeFirstResponder(webView)
+                }
+#endif
                 let dictionary = result as? [String: Any]
                 let count = Self.intValue(dictionary?["count"])
                 let index = Self.intValue(dictionary?["index"])

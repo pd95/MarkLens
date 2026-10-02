@@ -5,6 +5,7 @@
 //  Created by Philipp on 17.05.2026.
 //
 
+import AppKit
 import XCTest
 
 final class MarkLensUITests: XCTestCase {
@@ -398,6 +399,59 @@ final class MarkLensUITests: XCTestCase {
 
         preview.closeFind()
         capture(preview.window, name: "search-sample-search-closed")
+    }
+
+    @MainActor
+    func testFindToolbarTogglesAndKeepsCurrentMatchSelected() throws {
+        let preview = XCUIApplication().openDocument(named: "search-sample", fileExtension: "md")
+        defer { preview.terminate() }
+
+        let selectedText = preview.app.staticTexts["Think carefully about the final paragraph."].firstMatch
+        XCTAssertTrue(selectedText.waitForExistence(timeout: 5))
+        selectedText
+            .coordinate(withNormalizedOffset: CGVector(dx: 0.02, dy: 0.5))
+            .doubleClick()
+
+        let findButton = preview.app.buttons["previewFindButton"].firstMatch
+        XCTAssertTrue(findButton.waitForExistence(timeout: 5))
+        findButton.click()
+        XCTAssertTrue(preview.findField.waitForExistence(timeout: 5))
+        let queryDeadline = Date().addingTimeInterval(2)
+        while preview.findField.value as? String != "Think", Date() < queryDeadline {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+        }
+        XCTAssertEqual(preview.findField.value as? String, "Think")
+
+        let status = preview.app.staticTexts["previewFindStatus"].firstMatch
+        XCTAssertTrue(status.waitForExistence(timeout: 2))
+        let resultsDeadline = Date().addingTimeInterval(2)
+        while ((status.value as? String) ?? status.label).contains(" of ") == false,
+              Date() < resultsDeadline {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+        }
+        XCTAssertTrue(
+            ((status.value as? String) ?? status.label).contains(" of "),
+            "Expected the current search match to be active before closing Find."
+        )
+
+        findButton.click()
+        XCTAssertFalse(preview.findField.exists, "Expected a second toolbar click to close Find.")
+
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString("No selection", forType: .string)
+        preview.window.typeKey("c", modifierFlags: .command)
+        let deadline = Date().addingTimeInterval(2)
+        while NSPasteboard.general.string(forType: .string) != "Think", Date() < deadline {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+        }
+        XCTAssertEqual(
+            NSPasteboard.general.string(forType: .string),
+            "Think",
+            "Expected the active result to remain selected and copyable after closing Find."
+        )
+
+        findButton.click()
+        XCTAssertTrue(preview.findField.waitForExistence(timeout: 5))
     }
 
     @MainActor

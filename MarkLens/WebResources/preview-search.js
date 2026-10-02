@@ -171,6 +171,53 @@
         state.currentIndex = -1;
     }
 
+    function positionAtDocumentOffset(offset) {
+        const walker = document.createTreeWalker(rootElement(), NodeFilter.SHOW_TEXT);
+        let absoluteOffset = 0;
+        let node;
+
+        while ((node = walker.nextNode())) {
+            const length = (node.nodeValue || "").length;
+            if (offset <= absoluteOffset + length) {
+                return { node, offset: offset - absoluteOffset };
+            }
+            absoluteOffset += length;
+        }
+
+        return null;
+    }
+
+    function finishSearch() {
+        const hit = state.hits[state.currentIndex];
+        const start = hit ? hit.start : null;
+        const end = hit ? hit.end : null;
+        clearHighlights();
+        state.term = "";
+        state.activeStart = null;
+        state.lastSelectionStart = null;
+        state.lastSelectionText = null;
+
+        if (start == null || end == null) {
+            return result();
+        }
+
+        const startPosition = positionAtDocumentOffset(start);
+        const endPosition = positionAtDocumentOffset(end);
+        if (!startPosition || !endPosition) {
+            return result();
+        }
+
+        const range = document.createRange();
+        range.setStart(startPosition.node, startPosition.offset);
+        range.setEnd(endPosition.node, endPosition.offset);
+        const selection = window.getSelection();
+        if (selection) {
+            selection.removeAllRanges();
+            selection.addRange(range);
+        }
+        return result();
+    }
+
     function result() {
         return {
             count: state.hits.length,
@@ -423,6 +470,10 @@
                     state.activeStart = offset;
                 }
                 return resultWithSelection(result(), state.lastSelectionText || "");
+            }
+
+            if (command === "finish") {
+                return finishSearch();
             }
 
             if (command === "search") {

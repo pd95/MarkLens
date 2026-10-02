@@ -247,6 +247,14 @@ struct ContentView: View {
             .allowsHitTesting(!isRawEditing && !isWikiNavigationLoading)
             .zIndex(0)
 
+            if !isRawEditing {
+                Button("Find", action: beginPreviewFind)
+                    .keyboardShortcut("f")
+                    .frame(width: 0, height: 0)
+                    .opacity(0)
+                    .accessibilityHidden(true)
+            }
+
             if isRawEditing {
                 RawEditorView(
                     text: sourceTextBinding,
@@ -452,22 +460,20 @@ struct ContentView: View {
                     .disabled(canProduceRenderedOutput == false)
 
                     Button {
-                        beginPreviewFind()
+                        togglePreviewFind()
                     } label: {
                         Label("Find", systemImage: "magnifyingglass")
                     }
                     .accessibilityIdentifier("previewFindButton")
-                    .keyboardShortcut("f")
                 }
 #else
                 ToolbarItem(placement: .primaryAction) {
                     Button {
-                        beginPreviewFind()
+                        togglePreviewFind()
                     } label: {
                         Label("Find", systemImage: "magnifyingglass")
                     }
                     .accessibilityIdentifier("previewFindButton")
-                    .keyboardShortcut("f")
                 }
 
                 if isPreviewFindPresented || previewFindText.isEmpty == false {
@@ -736,7 +742,8 @@ struct ContentView: View {
             },
             findMatchCount: $previewFindMatchCount,
             findCurrentIndex: $previewFindCurrentIndex,
-            findTerm: isRawEditing ? "" : previewFindText,
+            findTerm: isRawEditing || !isPreviewFindPresented ? "" : previewFindText,
+            findIsPresented: isPreviewFindPresented && !isRawEditing,
             findRequest: previewFindRequest,
             findBackwards: previewFindBackwards,
             findAnchorRequest: previewFindAnchorRequest,
@@ -1370,6 +1377,14 @@ struct ContentView: View {
         previewFindAnchorRequest += 1
         previewFindFocusRequest += 1
         isPreviewFindPresented = true
+    }
+
+    private func togglePreviewFind() {
+        if isPreviewFindPresented {
+            closePreviewFind()
+        } else {
+            beginPreviewFind()
+        }
     }
 
     private func closePreviewFind() {

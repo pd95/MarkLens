@@ -45,14 +45,39 @@ body='{}'
 
 case "$request $url" in
     "GET "*"/releases/tags/"*)
-        body='{"id":100}'
+        if [[ "${FAKE_RELEASE_RACE:-0}" == "1" ]] \
+            && [[ "$(grep -c '/releases/tags/' "$FAKE_CURL_LOG")" == "1" ]]; then
+            status="404"
+            body='{"message":"Not Found"}'
+        else
+            body='{"id":100}'
+        fi
+        ;;
+    "POST "*"/releases")
+        if [[ "${FAKE_RELEASE_RACE:-0}" == "1" ]]; then
+            status="422"
+            body='{"errors":[{"resource":"Release","code":"already_exists","field":"tag_name"}]}'
+        else
+            status="201"
+            body='{"id":100}'
+        fi
         ;;
     "GET "*"/releases/100/assets")
-        body='[]'
+        if [[ "${FAKE_EXISTING_ASSET:-0}" == "1" ]] \
+            || { [[ "${FAKE_UPLOAD_RACE:-0}" == "1" ]] \
+                && grep -Fq '/releases/100/assets?name=' "$FAKE_CURL_LOG" \
+                && [[ "$(grep -c '/releases/100/assets$' "$FAKE_CURL_LOG")" -ge 3 ]]; }; then
+            body='[{"id":300,"name":"MarkLens-v1.6.0-rc4.zip","state":"uploaded","browser_download_url":"https://downloads.example/MarkLens.zip"}]'
+        else
+            body='[]'
+        fi
         ;;
     "POST "*"/releases/100/assets?name="*)
         status="${FAKE_UPLOAD_STATUS:-201}"
-        if [[ "$status" == "201" ]]; then
+        if [[ "${FAKE_UPLOAD_RACE:-0}" == "1" ]]; then
+            status="422"
+            body='{"message":"Validation Failed"}'
+        elif [[ "$status" == "201" ]]; then
             body='{"browser_download_url":"https://downloads.example/MarkLens.zip"}'
         else
             body='{"message":"simulated upload failure"}'
@@ -110,6 +135,9 @@ run_post_build() {
     PATH="$test_root/bin:$PATH" \
     FAKE_CURL_LOG="$test_root/curl.log" \
     FAKE_UPLOAD_STATUS="${FAKE_UPLOAD_STATUS:-201}" \
+    FAKE_RELEASE_RACE="${FAKE_RELEASE_RACE:-0}" \
+    FAKE_EXISTING_ASSET="${FAKE_EXISTING_ASSET:-0}" \
+    FAKE_UPLOAD_RACE="${FAKE_UPLOAD_RACE:-0}" \
     CI_XCODEBUILD_ACTION="archive" \
     CI_XCODEBUILD_EXIT_CODE="0" \
     CI_TAG="$tag" \
@@ -147,6 +175,24 @@ if FAKE_UPLOAD_STATUS="500" run_post_build "refs/tags/v1.6.0"; then
 fi
 if grep -Fq '/releases?per_page=' "$test_root/curl.log"; then
     echo "Failed final upload unexpectedly attempted release cleanup." >&2
+    exit 1
+fi
+
+: > "$test_root/curl.log"
+FAKE_RELEASE_RACE=1 FAKE_EXISTING_ASSET=1 run_post_build "refs/tags/v1.6.0-rc4"
+if [[ "$(grep -c '/releases/tags/' "$test_root/curl.log")" != "2" ]]; then
+    echo "Concurrent release creation was not followed by a tag lookup." >&2
+    exit 1
+fi
+if grep -Eq $'^(DELETE|POST)\t.*/releases/100/assets' "$test_root/curl.log"; then
+    echo "Concurrent build replaced an already uploaded release asset." >&2
+    exit 1
+fi
+
+: > "$test_root/curl.log"
+FAKE_UPLOAD_RACE=1 run_post_build "refs/tags/v1.6.0-rc4"
+if [[ "$(grep -c '/releases/100/assets$' "$test_root/curl.log")" != "3" ]]; then
+    echo "Concurrent asset upload was not followed by an asset lookup." >&2
     exit 1
 fi
 

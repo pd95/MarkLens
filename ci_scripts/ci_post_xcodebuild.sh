@@ -127,14 +127,19 @@ accept_header="Accept: application/vnd.github+json"
 release_json="$WORK_DIR/release.json"
 release_status="$WORK_DIR/release.status"
 
+lookup_release_by_tag() {
+    curl --silent --show-error --location \
+        --header "$accept_header" \
+        --header "$auth_header" \
+        --header "$api_version_header" \
+        --output "$release_json" \
+        --write-out "%{http_code}" \
+        "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/releases/tags/$TAG_NAME"
+}
+
 echo "Looking up GitHub Release for $TAG_NAME"
-http_code="$(curl --silent --show-error --location \
-    --header "$accept_header" \
-    --header "$auth_header" \
-    --header "$api_version_header" \
-    --output "$release_json" \
-    --write-out "%{http_code}" \
-    "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/releases/tags/$TAG_NAME")"
+http_code="$(lookup_release_by_tag)"
+release_created_concurrently=false
 
 if [[ "$http_code" == "404" ]]; then
     echo "Creating GitHub Release for $TAG_NAME"
@@ -163,6 +168,20 @@ if [[ "$http_code" == "404" ]]; then
         --output "$release_json" \
         --write-out "%{http_code}" \
         "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/releases")"
+
+    if [[ "$http_code" == "422" ]] && jq --exit-status '
+        any(.errors[]?; .resource == "Release"
+            and .code == "already_exists"
+            and .field == "tag_name")
+    ' "$release_json" >/dev/null; then
+        echo "Another build created GitHub Release $TAG_NAME; looking it up."
+        release_created_concurrently=true
+        for attempt in {1..5}; do
+            http_code="$(lookup_release_by_tag)"
+            [[ "$http_code" != "404" ]] && break
+            sleep 1
+        done
+    fi
 fi
 
 if [[ "$http_code" -lt 200 || "$http_code" -gt 299 ]]; then
@@ -201,7 +220,14 @@ existing_asset_id="$(jq --raw-output --arg name "$ASSET_NAME" '
         empty
     end
 ' "$assets_json")"
-if [[ -n "$existing_asset_id" ]]; then
+existing_asset_url="$(jq --raw-output --arg name "$ASSET_NAME" '
+    first(.[] | select(.name == $name and .state == "uploaded") | .browser_download_url) // empty
+' "$assets_json")"
+
+if [[ "$release_created_concurrently" == true && -n "$existing_asset_url" ]]; then
+    echo "Another build already uploaded GitHub Release asset: $existing_asset_url"
+    browser_download_url="$existing_asset_url"
+elif [[ -n "$existing_asset_id" ]]; then
     echo "Deleting existing release asset $ASSET_NAME"
     http_code="$(curl --silent --show-error --location \
         --request DELETE \
@@ -219,27 +245,53 @@ if [[ -n "$existing_asset_id" ]]; then
     fi
 fi
 
-echo "Uploading $ASSET_NAME to GitHub Release $TAG_NAME"
-upload_json="$WORK_DIR/upload.json"
-http_code="$(curl --silent --show-error --location \
-    --request POST \
-    --header "$accept_header" \
-    --header "$auth_header" \
-    --header "$api_version_header" \
-    --header "Content-Type: application/zip" \
-    --data-binary @"$ASSET_PATH" \
-    --output "$upload_json" \
-    --write-out "%{http_code}" \
-    "$GITHUB_UPLOADS_URL/repos/$GITHUB_REPOSITORY/releases/$release_id/assets?name=$ASSET_NAME")"
+if [[ -z "${browser_download_url:-}" ]]; then
+    echo "Uploading $ASSET_NAME to GitHub Release $TAG_NAME"
+    upload_json="$WORK_DIR/upload.json"
+    http_code="$(curl --silent --show-error --location \
+        --request POST \
+        --header "$accept_header" \
+        --header "$auth_header" \
+        --header "$api_version_header" \
+        --header "Content-Type: application/zip" \
+        --data-binary @"$ASSET_PATH" \
+        --output "$upload_json" \
+        --write-out "%{http_code}" \
+        "$GITHUB_UPLOADS_URL/repos/$GITHUB_REPOSITORY/releases/$release_id/assets?name=$ASSET_NAME")"
 
-if [[ "$http_code" -lt 200 || "$http_code" -gt 299 ]]; then
-    echo "error: GitHub asset upload failed with HTTP $http_code"
-    jq . "$upload_json" || cat "$upload_json"
-    exit 1
+    if [[ "$http_code" -ge 200 && "$http_code" -le 299 ]]; then
+        browser_download_url="$(jq --raw-output '.browser_download_url // empty' "$upload_json")"
+        echo "Uploaded GitHub Release asset: $browser_download_url"
+    elif [[ "$http_code" == "422" ]]; then
+        echo "Checking whether another build uploaded $ASSET_NAME."
+        race_assets_json="$WORK_DIR/race-assets.json"
+        for attempt in {1..5}; do
+            assets_code="$(curl --silent --show-error --location \
+                --header "$accept_header" \
+                --header "$auth_header" \
+                --header "$api_version_header" \
+                --output "$race_assets_json" \
+                --write-out "%{http_code}" \
+                "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/releases/$release_id/assets")"
+            if [[ "$assets_code" -ge 200 && "$assets_code" -le 299 ]]; then
+                browser_download_url="$(jq --raw-output --arg name "$ASSET_NAME" '
+                    first(.[] | select(.name == $name and .state == "uploaded") | .browser_download_url) // empty
+                ' "$race_assets_json")"
+            fi
+            [[ -n "${browser_download_url:-}" ]] && break
+            [[ "$attempt" -lt 5 ]] && sleep 1
+        done
+        if [[ -n "${browser_download_url:-}" ]]; then
+            echo "Another build uploaded GitHub Release asset: $browser_download_url"
+        fi
+    fi
+
+    if [[ -z "${browser_download_url:-}" ]]; then
+        echo "error: GitHub asset upload failed with HTTP $http_code"
+        jq . "$upload_json" || cat "$upload_json"
+        exit 1
+    fi
 fi
-
-browser_download_url="$(jq --raw-output '.browser_download_url // empty' "$upload_json")"
-echo "Uploaded GitHub Release asset: $browser_download_url"
 
 cleanup_release_candidates() {
     local stable_tag="$1"

@@ -14,6 +14,10 @@
 - `xcodebuild -project MarkLens.xcodeproj -scheme MarkLens -configuration Debug build` builds the app from the CLI.
 - `xcodebuild -project MarkLens.xcodeproj -scheme QuickLookPreview -configuration Debug build` builds the Quick Look extension.
 - `MarkLensTests/`, `MarkLensUITests/`, and `MarkdownPipeline/Tests/` contain automated tests. Prefer the Xcode MCP test tools for app/UI tests and `swift test --package-path MarkdownPipeline` for Linux-compatible package tests.
+- UI tests can outlast the Xcode MCP call timeout. Start a test run only once and keep waiting on its original tool call while it is pending.
+- If `RunAllTests` or `RunSomeTests` itself times out, treat the run's status as unknown: the tests may still be running in Xcode. Do not invoke a test tool again to poll or restart the suite.
+- Use read-only Xcode MCP diagnostics such as `XcodeListNavigatorIssues` to inspect reported failures, and report that completion is unverified unless a test result is actually available. The absence of navigator issues or a successful `GetBuildLog` does not prove that tests passed.
+- Once the original run has finished and identified failed UI tests, rerun only those failed tests individually with `RunSomeTests`. Do not rerun the entire UI suite to investigate individual failures.
 - If `xcodebuild` crashes during device discovery, reset simulator device sets:
   `for DEVICES_SET in playgrounds previews ib test default; do xcrun simctl --set $DEVICES_SET delete all; done`
 - To test Quick Look on macOS from the CLI after building, run:

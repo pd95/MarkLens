@@ -605,34 +605,11 @@ struct HTMLVisitor: MarkupVisitor {
 
     private mutating func uniqueHeadingID(for heading: Heading) -> String {
         let headingText = plugins.restoreLiteral(heading.plainText)
-        let base = slugifiedHeadingID(from: headingText)
+        let base = WikiHeadingID.slug(from: headingText)
         let count = headingIDCounts[base, default: 0]
         let identifier = count == 0 ? base : "\(base)-\(count)"
         headingIDCounts[base] = count + 1
         return identifier
     }
 
-    private func slugifiedHeadingID(from text: String) -> String {
-        let lowercase = text.lowercased()
-        var slug = ""
-        var needsDash = false
-
-        for scalar in lowercase.unicodeScalars {
-            if scalar.isASCII, CharacterSet.alphanumerics.contains(scalar) {
-                if needsDash && slug.isEmpty == false {
-                    slug.append("-")
-                }
-                needsDash = false
-                slug.append(Character(scalar))
-            } else {
-                needsDash = true
-            }
-        }
-
-        if slug.isEmpty {
-            return "section"
-        }
-
-        return slug
-    }
 }

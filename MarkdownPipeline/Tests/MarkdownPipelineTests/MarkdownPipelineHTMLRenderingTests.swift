@@ -293,13 +293,59 @@ struct MarkdownPipelineHTMLRenderingTests {
     }
 
     @Test func leavesUnsupportedWikiLinkFormsAsText() throws {
-        let input = "[[../secret]] [[note#Heading]] [[note^block]] [[note|]]"
+        let input = "[[../secret]] [[note^block]] [[note|]]"
         let pipeline = MarkdownPipeline()
         let document = try pipeline.render(input: .string(input), context: PipelineContext())
 
         #expect(document.containsWikiLinks == false)
         #expect(document.html.contains("[[../secret]]"))
-        #expect(document.html.contains("[[note#Heading]]"))
+        #expect(document.html.contains("[[note^block]]"))
+    }
+
+    @Test func rendersNamedAndHeadingWikiLinksInsideTables() throws {
+        let input = """
+        | Code | Local label | Start here | Deeper route |
+        |---|---|---|---|
+        | `xfermon` | Money Transfer | `DOC` + `DOC_XFERMON` | [[transaction-workflow-and-booking-events]] |
+        | `xfermon` | Money Transfer | `DOC` + `DOC_XFERMON` | [[transaction-workflow-and-booking-events|XFERMON traces]] |
+        | `xfermon` | Money Transfer | `DOC` + `DOC_XFERMON` | [[transaction-workflow-and-booking-events#client-money-transfer-baseline|XFERMON traces]] |
+        """
+        let document = try MarkdownPipeline().render(input: .string(input), context: PipelineContext())
+
+        #expect(document.containsWikiLinks)
+        #expect(document.html.contains("target=transaction-workflow-and-booking-events\""))
+        #expect(document.html.contains(">XFERMON traces</a>"))
+        #expect(document.html.contains("target=transaction-workflow-and-booking-events%23client-money-transfer-baseline\""))
+        #expect(document.html.components(separatedBy: ">XFERMON traces</a>").count - 1 == 2)
+        let tableBody = String(document.html[
+            document.html.range(of: "<tbody")!.lowerBound..<document.html.range(of: "</tbody>")!.upperBound
+        ])
+        #expect(tableBody.components(separatedBy: "<td").count - 1 == 12)
+    }
+
+    @Test func preservesNamedWikiLinkSyntaxInsideCode() throws {
+        let input = "Use `[[note|Label]]`.\n\n```text\n[[note|Label]]\n```"
+        let document = try MarkdownPipeline().render(input: .string(input), context: PipelineContext())
+
+        #expect(document.containsWikiLinks == false)
+        #expect(document.html.contains("<code>[[note|Label]]</code>"))
+        #expect(document.html.contains("[[note|Label]]"))
+    }
+
+    @Test func malformedWikiLinkDoesNotConsumeTableSeparator() throws {
+        let input = """
+        | First | Second |
+        |---|---|
+        | [[unfinished | next [[valid]] |
+        """
+        let document = try MarkdownPipeline().render(input: .string(input), context: PipelineContext())
+        let tableBody = String(document.html[
+            document.html.range(of: "<tbody")!.lowerBound..<document.html.range(of: "</tbody>")!.upperBound
+        ])
+
+        #expect(tableBody.components(separatedBy: "<td").count - 1 == 2)
+        #expect(tableBody.contains("[[unfinished"))
+        #expect(tableBody.contains("target=valid"))
     }
 
     @Test func doesNotRenderWikiLinksInsideCode() throws {

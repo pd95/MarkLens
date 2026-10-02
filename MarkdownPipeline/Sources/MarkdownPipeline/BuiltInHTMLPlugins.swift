@@ -38,16 +38,21 @@ final class WikiLinkHTMLPlugin: HTMLRenderingPlugin {
 
 private final class WikiLinkHTMLPluginSession: HTMLRenderingPluginSession {
     private var placeholder: String?
+    private var separatorPlaceholder: String?
     private var containsWikiLinks = false
 
     func preprocess(_ markdown: String) -> String {
         let protected = WikiLinkEscapes.protect(in: markdown)
         placeholder = protected.placeholder
+        separatorPlaceholder = protected.separatorPlaceholder
         return protected.markdown
     }
 
     func restoreLiteral(_ text: String) -> String {
-        WikiLinkEscapes.restoreText(text, placeholder: placeholder, includeBackslash: true)
+        WikiLinkEscapes.restoreSeparator(
+            WikiLinkEscapes.restoreText(text, placeholder: placeholder, includeBackslash: true),
+            placeholder: separatorPlaceholder
+        )
     }
 
     func renderText(
@@ -56,13 +61,19 @@ private final class WikiLinkHTMLPluginSession: HTMLRenderingPluginSession {
         next: (String) -> String
     ) -> String {
         guard environment.allowsWikiLinks else {
-            return WikiLinkEscapes.restoreText(
-                text,
-                placeholder: placeholder,
-                includeBackslash: false
+            return WikiLinkEscapes.restoreSeparator(
+                WikiLinkEscapes.restoreText(
+                    text,
+                    placeholder: placeholder,
+                    includeBackslash: false
+                ),
+                placeholder: separatorPlaceholder
             ).encodedHTMLEntities()
         }
-        let rendered = WikiLinkRenderer.render(text, escapedWikiLinkPlaceholder: placeholder)
+        let rendered = WikiLinkRenderer.render(
+            WikiLinkEscapes.restoreSeparator(text, placeholder: separatorPlaceholder),
+            escapedWikiLinkPlaceholder: placeholder
+        )
         containsWikiLinks = containsWikiLinks || rendered.containsWikiLinks
         return rendered.html
     }

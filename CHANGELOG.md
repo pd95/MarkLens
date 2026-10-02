@@ -5,6 +5,7 @@
 - Browse local Markdown and wiki links in the current window. Set the default and choose window or tab behavior in Navigation settings.
 - Open linked documents in native macOS tabs with Command-click or Open in New Tab.
 - Link directly to a Markdown source line, including through `marklens://open` links from other apps. MarkLens scrolls to the rendered line.
+- Follow wiki links with display labels inside tables and links to headings such as `[[note#heading|Label]]`.
 - Reopen document windows at their previous size and position, adjusted to fit smaller displays.
 - Find document navigation in its own Settings tab and linked-image controls in Content & Privacy. The Custom CSS editor now fills the available space in Appearance.
 - Fixed misplaced link context menus, made preview Find toggle from the toolbar while preserving the selected match, clarified Settings controls, and added separate Help commands for current release notes and the full changelog.

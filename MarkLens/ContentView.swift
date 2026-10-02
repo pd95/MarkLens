@@ -191,6 +191,7 @@ struct ContentView: View {
     @State private var wikiLinkMatches: [URL] = []
     @State private var wikiLinkMatchesRoot: URL?
     @State private var wikiLinkMatchesOpenInTab = false
+    @State private var wikiLinkMatchesHeading: String?
     @State private var wikiResolutionGeneration = 0
     @State private var isResolvingWikiLink = false
     @State private var wikiResolutionWork: Task<WikiLinkResolution, Never>?
@@ -792,8 +793,9 @@ struct ContentView: View {
         if let root = wikiLinkMatchesRoot {
             WikiLinkMatchChooser(matches: wikiLinkMatches, root: root) { url in
                 let inNewTab = wikiLinkMatchesOpenInTab
+                let heading = wikiLinkMatchesHeading
                 clearWikiLinkMatches()
-                openResolvedWikiDocument(url, wikiRoot: root, inNewTab: inNewTab)
+                openSelectedWikiDocument(url, wikiRoot: root, heading: heading, inNewTab: inNewTab)
             }
         } else {
             EmptyView()
@@ -1607,6 +1609,9 @@ struct ContentView: View {
     }
 
     private func resolveWikiLink(_ target: String, inNewTab: Bool = false) {
+        let parts = target.split(separator: "#", maxSplits: 1, omittingEmptySubsequences: false)
+        let documentTarget = String(parts[0])
+        let heading = parts.count == 2 ? String(parts[1]) : nil
         guard let fileURL else {
             localDocumentError = "Save this document before opening wikilinks."
             return
@@ -1622,12 +1627,22 @@ struct ContentView: View {
         wikiResolutionWork?.cancel()
         let work = Task.detached(priority: .userInitiated) {
             do {
-                let matches = try WikiLinkResolver().matches(
-                    for: target,
+                let resolver = WikiLinkResolver()
+                let matches = try resolver.matches(
+                    for: documentTarget,
                     in: root,
                     shouldCancel: { Task.isCancelled }
                 )
-                return WikiLinkResolution.success(matches)
+                let line = try heading.flatMap { heading in
+                    try matches.count == 1
+                        ? resolver.sourceLine(
+                            forHeading: heading,
+                            in: matches[0],
+                            shouldCancel: { Task.isCancelled }
+                        )
+                        : nil
+                }
+                return WikiLinkResolution.matches(matches, line)
             } catch is CancellationError {
                 return WikiLinkResolution.cancelled
             } catch {
@@ -1643,30 +1658,89 @@ struct ContentView: View {
             wikiResolutionWork = nil
 
             switch resolution {
-            case .success(let matches):
+            case .matches(let matches, let line):
                 if matches.count == 1, let match = matches.first {
-                    openResolvedWikiDocument(match, wikiRoot: root, inNewTab: inNewTab)
+                    openResolvedWikiDocument(match, wikiRoot: root, line: line, inNewTab: inNewTab)
                 } else {
                     wikiLinkMatchesRoot = root
                     wikiLinkMatches = matches
                     wikiLinkMatchesOpenInTab = inNewTab
+                    wikiLinkMatchesHeading = heading
                 }
             case .failure(let description):
                 localDocumentError = description
             case .cancelled:
                 break
+            case .headingLine:
+                break
             }
         }
     }
 
-    private func openResolvedWikiDocument(_ url: URL, wikiRoot: URL, inNewTab: Bool) {
+    private func openSelectedWikiDocument(
+        _ url: URL,
+        wikiRoot: URL,
+        heading: String?,
+        inNewTab: Bool
+    ) {
+        guard let heading else {
+            openResolvedWikiDocument(url, wikiRoot: wikiRoot, line: nil, inNewTab: inNewTab)
+            return
+        }
+
+        wikiResolutionGeneration += 1
+        let generation = wikiResolutionGeneration
+        isResolvingWikiLink = true
+        wikiResolutionWork?.cancel()
+        let work = Task.detached(priority: .userInitiated) {
+            do {
+                let line = try WikiLinkResolver().sourceLine(
+                    forHeading: heading,
+                    in: url,
+                    shouldCancel: { Task.isCancelled }
+                )
+                return WikiLinkResolution.headingLine(line)
+            } catch is CancellationError {
+                return WikiLinkResolution.cancelled
+            } catch {
+                return WikiLinkResolution.failure(error.localizedDescription)
+            }
+        }
+        wikiResolutionWork = work
+        Task {
+            let resolution = await work.value
+            guard generation == wikiResolutionGeneration else { return }
+            isResolvingWikiLink = false
+            wikiResolutionWork = nil
+
+            switch resolution {
+            case .headingLine(let line):
+                openResolvedWikiDocument(url, wikiRoot: wikiRoot, line: line, inNewTab: inNewTab)
+            case .failure(let description):
+                localDocumentError = description
+            case .cancelled, .matches:
+                break
+            }
+        }
+    }
+
+    private func openResolvedWikiDocument(
+        _ url: URL,
+        wikiRoot: URL,
+        line: Int?,
+        inNewTab: Bool
+    ) {
         if viewModeEnabled && !inNewTab {
-            navigateInView(to: url, wikiRoot: wikiRoot)
+            navigateInView(to: url, wikiRoot: wikiRoot, line: line)
         } else {
+            if let line {
+                lineNavigation.enqueue(fileURL: url, line: line)
+            }
             Task {
                 do {
                     try await openLinkedDocument(url, inNewTab: inNewTab)
                 } catch {
+                    lineNavigation.cancel(for: url)
                     localDocumentError = error.localizedDescription
                 }
             }
@@ -1776,6 +1850,7 @@ struct ContentView: View {
         wikiLinkMatches = []
         wikiLinkMatchesRoot = nil
         wikiLinkMatchesOpenInTab = false
+        wikiLinkMatchesHeading = nil
     }
 
     private func isSupportedMarkdownDocument(_ url: URL) -> Bool {
@@ -1807,7 +1882,8 @@ private enum LocalAccessRequest {
 }
 
 private enum WikiLinkResolution: Sendable {
-    case success([URL])
+    case matches([URL], Int?)
+    case headingLine(Int)
     case failure(String)
     case cancelled
 }

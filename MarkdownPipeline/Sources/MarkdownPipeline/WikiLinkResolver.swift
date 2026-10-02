@@ -1,8 +1,10 @@
 import Foundation
+import Markdown
 
 public enum WikiLinkResolverError: LocalizedError, Sendable {
     case invalidTarget
     case missingTarget(String)
+    case missingHeading(String)
 
     public var errorDescription: String? {
         switch self {
@@ -10,6 +12,8 @@ public enum WikiLinkResolverError: LocalizedError, Sendable {
             return "This wikilink target is not valid."
         case .missingTarget(let target):
             return "No Markdown document named \(target) was found in the selected wiki folder."
+        case .missingHeading(let heading):
+            return "No heading named \(heading) was found in the linked document."
         }
     }
 }
@@ -90,6 +94,32 @@ public struct WikiLinkResolver: Sendable {
         return fileComponents.dropFirst(rootComponents.count).joined(separator: "/")
     }
 
+    public func sourceLine(
+        forHeading heading: String,
+        in documentURL: URL,
+        shouldCancel: @Sendable () -> Bool = { false }
+    ) throws -> Int {
+        let heading = heading.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard heading.isEmpty == false else { throw WikiLinkResolverError.invalidTarget }
+        if shouldCancel() { throw CancellationError() }
+        let markdown = try String(contentsOf: documentURL, encoding: .utf8)
+        if shouldCancel() { throw CancellationError() }
+        let extraction = FrontMatterExtractor().extract(from: markdown)
+        let normalized = MarkdownFenceNormalizer().normalize(extraction.bodyMarkdown)
+        let document = Document(parsing: normalized)
+        if shouldCancel() { throw CancellationError() }
+        var lookup = HeadingLineLookup(
+            requestedID: WikiHeadingID.slug(from: heading),
+            requestedText: heading,
+            matchesByText: heading.unicodeScalars.contains(where: { $0.isASCII == false }),
+            lineOffset: extraction.bodyLineOffset
+        )
+        guard let line = try lookup.find(in: document, shouldCancel: shouldCancel) else {
+            throw WikiLinkResolverError.missingHeading(heading)
+        }
+        return line
+    }
+
     private func normalized(_ target: String) -> (target: String, hasExplicitExtension: Bool)? {
         let target = target.trimmingCharacters(in: .whitespacesAndNewlines)
         guard target.isEmpty == false,
@@ -109,5 +139,39 @@ public struct WikiLinkResolver: Sendable {
         let folderComponents = folder.standardizedFileURL.pathComponents
         return fileComponents.starts(with: folderComponents)
             && fileComponents.count > folderComponents.count
+    }
+}
+
+private struct HeadingLineLookup {
+    let requestedID: String
+    let requestedText: String
+    let matchesByText: Bool
+    let lineOffset: Int
+    var counts: [String: Int] = [:]
+    var textCounts: [String: Int] = [:]
+
+    mutating func find(in markup: Markup, shouldCancel: () -> Bool) throws -> Int? {
+        if shouldCancel() { throw CancellationError() }
+        if let heading = markup as? Heading {
+            let base = WikiHeadingID.slug(from: heading.plainText)
+            let count = counts[base, default: 0]
+            let identifier = count == 0 ? base : "\(base)-\(count)"
+            counts[base] = count + 1
+            let headingText = heading.plainText
+            let textKey = headingText.lowercased()
+            let textCount = textCounts[textKey, default: 0]
+            textCounts[textKey] = textCount + 1
+            let textReference = textCount == 0 ? headingText : "\(headingText)-\(textCount)"
+            let matches = matchesByText
+                ? textReference.compare(requestedText, options: [.caseInsensitive]) == .orderedSame
+                : identifier == requestedID
+            if matches, let range = heading.range {
+                return range.lowerBound.line + lineOffset
+            }
+        }
+        for child in markup.children {
+            if let line = try find(in: child, shouldCancel: shouldCancel) { return line }
+        }
+        return nil
     }
 }

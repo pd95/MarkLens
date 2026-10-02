@@ -57,18 +57,22 @@ struct WikiLinkRenderer {
         return Result(html: html, containsWikiLinks: foundWikiLink)
     }
 
-    private static func parse(_ contents: String) -> (target: String, label: String)? {
+    static func parse(_ contents: String) -> (target: String, label: String)? {
+        guard contents.contains("[[") == false else { return nil }
         let pieces = contents.split(separator: "|", maxSplits: 1, omittingEmptySubsequences: false)
         let target = String(pieces[0]).trimmingCharacters(in: .whitespacesAndNewlines)
-        guard target.isEmpty == false,
-              target.hasPrefix("/") == false,
-              target.hasPrefix("~") == false,
-              target.contains("#") == false,
-              target.contains("^") == false else {
+        let destinationParts = target.split(separator: "#", maxSplits: 1, omittingEmptySubsequences: false)
+        let documentTarget = String(destinationParts[0])
+        guard documentTarget.isEmpty == false,
+              documentTarget.hasPrefix("/") == false,
+              documentTarget.hasPrefix("~") == false,
+              target.contains("^") == false,
+              (destinationParts.count == 1 ||
+               (destinationParts[1].isEmpty == false && destinationParts[1].contains("#") == false)) else {
             return nil
         }
 
-        let components = target.split(separator: "/", omittingEmptySubsequences: false)
+        let components = documentTarget.split(separator: "/", omittingEmptySubsequences: false)
         guard components.allSatisfy({ $0.isEmpty == false && $0 != "." && $0 != ".." }) else {
             return nil
         }
@@ -96,20 +100,26 @@ enum WikiLinkEscapes {
     struct ProtectedMarkdown {
         let markdown: String
         let placeholder: String?
+        let separatorPlaceholder: String?
     }
 
     static func protect(in markdown: String) -> ProtectedMarkdown {
-        guard containsEscapedOpener(markdown) else {
-            return ProtectedMarkdown(markdown: markdown, placeholder: nil)
+        guard markdown.contains("[[") else {
+            return ProtectedMarkdown(markdown: markdown, placeholder: nil, separatorPlaceholder: nil)
         }
-
         var placeholder = "\u{F0000}marklens-escaped-wikilink\u{F0001}"
         while markdown.contains(placeholder) {
             placeholder += "\u{F0002}"
         }
+        var separatorPlaceholder = "\u{F0000}marklens-wikilink-separator\u{F0001}"
+        while markdown.contains(separatorPlaceholder) {
+            separatorPlaceholder += "\u{F0002}"
+        }
 
         var result = ""
         var index = markdown.startIndex
+        var hasEscapedOpener = false
+        var hasProtectedSeparator = false
         while index < markdown.endIndex {
             if markdown[index] == "\\" {
                 let runStart = index
@@ -121,16 +131,33 @@ enum WikiLinkEscapes {
                    markdown[index...].hasPrefix("[[") {
                     result += String(repeating: "\\", count: count - 1)
                     result += placeholder
+                    hasEscapedOpener = true
                     index = markdown.index(index, offsetBy: 2)
                 } else {
                     result += String(markdown[runStart..<index])
                 }
+            } else if markdown[index...].hasPrefix("[["),
+                      let closer = markdown.range(of: "]]", range: markdown.index(index, offsetBy: 2)..<markdown.endIndex) {
+                let rawContents = String(markdown[markdown.index(index, offsetBy: 2)..<closer.lowerBound])
+                let contents = markdown[index..<closer.upperBound]
+                if rawContents.contains("|"), rawContents.contains("\n") == false,
+                   WikiLinkRenderer.parse(rawContents) != nil {
+                    result += contents.replacingOccurrences(of: "|", with: separatorPlaceholder)
+                    hasProtectedSeparator = true
+                } else {
+                    result += contents
+                }
+                index = closer.upperBound
             } else {
                 result.append(markdown[index])
                 index = markdown.index(after: index)
             }
         }
-        return ProtectedMarkdown(markdown: result, placeholder: placeholder)
+        return ProtectedMarkdown(
+            markdown: result,
+            placeholder: hasEscapedOpener ? placeholder : nil,
+            separatorPlaceholder: hasProtectedSeparator ? separatorPlaceholder : nil
+        )
     }
 
     static func restoreText(
@@ -145,7 +172,8 @@ enum WikiLinkEscapes {
         )
     }
 
-    private static func containsEscapedOpener(_ markdown: String) -> Bool {
-        markdown.contains("\\[[")
+    static func restoreSeparator(_ text: String, placeholder: String?) -> String {
+        guard let placeholder else { return text }
+        return text.replacingOccurrences(of: placeholder, with: "|")
     }
 }

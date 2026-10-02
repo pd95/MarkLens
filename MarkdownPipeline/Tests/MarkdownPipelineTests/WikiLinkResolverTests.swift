@@ -85,6 +85,42 @@ struct WikiLinkResolverTests {
         }
     }
 
+    @Test func findsHeadingLinesWithFrontMatterAndDuplicateHeadings() throws {
+        try withWiki { root in
+            let target = root.appendingPathComponent("Transaction.md")
+            try """
+            ---
+            title: Transaction
+            ---
+            # Overview
+            ## Client Money Transfer Baseline
+            ## Client Money Transfer Baseline
+            """.write(to: target, atomically: true, encoding: .utf8)
+
+            let resolver = WikiLinkResolver()
+            #expect(try resolver.sourceLine(forHeading: "client-money-transfer-baseline", in: target) == 5)
+            #expect(try resolver.sourceLine(forHeading: "client-money-transfer-baseline-1", in: target) == 6)
+            #expect(throws: WikiLinkResolverError.self) {
+                try resolver.sourceLine(forHeading: "missing-heading", in: target)
+            }
+        }
+    }
+
+    @Test func distinguishesNonLatinHeadings() throws {
+        try withWiki { root in
+            let target = root.appendingPathComponent("Notes.md")
+            try "# 第一\n\n# 第二\n\n# Cafe\n\n# Café\n\n# 第一\n".write(
+                to: target, atomically: true, encoding: .utf8
+            )
+
+            let resolver = WikiLinkResolver()
+            #expect(try resolver.sourceLine(forHeading: "第一", in: target) == 1)
+            #expect(try resolver.sourceLine(forHeading: "第二", in: target) == 3)
+            #expect(try resolver.sourceLine(forHeading: "Café", in: target) == 7)
+            #expect(try resolver.sourceLine(forHeading: "第一-1", in: target) == 9)
+        }
+    }
+
     private func withWiki(_ body: (URL) throws -> Void) throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("wikilink-tests-\(UUID().uuidString)", isDirectory: true)

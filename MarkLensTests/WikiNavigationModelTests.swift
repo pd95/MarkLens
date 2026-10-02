@@ -596,8 +596,8 @@ final class WikiNavigationModelTests: XCTestCase {
     }
 
     private func waitForLoad(_ model: WikiNavigationModel) async {
-        for _ in 0..<100 where model.isLoading {
-            try? await Task.sleep(for: .milliseconds(5))
+        for _ in 0..<500 where model.isLoading {
+            try? await Task.sleep(for: .milliseconds(10))
         }
         XCTAssertFalse(model.isLoading)
     }

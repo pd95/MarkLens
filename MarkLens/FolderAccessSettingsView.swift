@@ -4,52 +4,13 @@ import SwiftUI
 import AppKit
 
 struct FolderAccessSettingsView: View {
-    private static let linkedImagesExplanation =
-        "Shows supported images linked from the document. MarkLens may ask for access to the document’s folder "
-        + "when an image needs it."
-
     @EnvironmentObject private var localDocumentAccess: LocalDocumentAccess
-    @AppStorage(SecurityPreferences.loadsLocalImagesKey)
-    private var loadsLocalImages = true
-    @AppStorage(ViewModePreferences.defaultKey)
-    private var defaultViewMode = false
-    @AppStorage(LinkedDocumentOpenPreference.key)
-    private var linkedDocumentOpenPreference = LinkedDocumentOpenPreference.followSystem.rawValue
     @State private var isForgetAllConfirmationPresented = false
     @State private var folderAvailability: [URL: Bool] = [:]
     @State private var availabilityRefreshGeneration = 0
 
     var body: some View {
         Form {
-            Section("Document Navigation") {
-                Toggle("Browse links in the current window by default", isOn: $defaultViewMode)
-                    .accessibilityIdentifier("defaultViewModeToggle")
-                Text("Local Markdown and wiki links open inside the current document window. "
-                    + "You can change this for each file from its toolbar.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-
-                Picker("When opening linked documents", selection: $linkedDocumentOpenPreference) {
-                    Text("Follow macOS").tag(LinkedDocumentOpenPreference.followSystem.rawValue)
-                    Text("New Window").tag(LinkedDocumentOpenPreference.newWindow.rawValue)
-                    Text("New Tab").tag(LinkedDocumentOpenPreference.newTab.rawValue)
-                }
-                .accessibilityIdentifier("linkedDocumentOpenPreferencePicker")
-                Text("Applies when Browse Links Here is off. Command-click and Open in New Tab still open a tab.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-            }
-
-            Section("Linked Local Content") {
-                Toggle("Show linked images from this Mac", isOn: $loadsLocalImages)
-                    .accessibilityIdentifier("loadsLocalImagesToggle")
-                    .accessibilityHint(Self.linkedImagesExplanation)
-                Text(Self.linkedImagesExplanation)
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .accessibilityHidden(true)
-            }
-
             Section("Files & Folders") {
                 Text("MarkLens uses these folders to open linked documents and show local images.")
                     .font(.callout)
@@ -84,7 +45,12 @@ struct FolderAccessSettingsView: View {
                                 localDocumentAccess.revoke(folder: folder)
                             }
                             .labelStyle(.iconOnly)
-                            .help("Forget access to \(folder.lastPathComponent)")
+                            .accessibilityLabel("Forget access to \(folder.path)")
+                            .accessibilityHint("Removes saved access. The folder and its files are not deleted.")
+                            .help(
+                                "Remove saved access to \(folder.path). "
+                                    + "The folder is not deleted; MarkLens will ask again if needed."
+                            )
                         }
                         .contextMenu {
                             Button("Open in Finder", systemImage: "folder") {
@@ -97,6 +63,7 @@ struct FolderAccessSettingsView: View {
                             Button("Forget Access", systemImage: "trash", role: .destructive) {
                                 localDocumentAccess.revoke(folder: folder)
                             }
+                            .accessibilityLabel("Forget access to \(folder.path)")
                         }
                     }
                     .frame(minHeight: 140)

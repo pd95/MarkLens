@@ -258,6 +258,7 @@ final class UpdateChecker: ObservableObject {
     let currentVersion: String
     private let automaticChecksAvailable: Bool
     private let manualChecksEnabled: Bool
+    private let usesMockRelease: Bool
     private let defaults: UserDefaults
     private let now: () -> Date
     private let request: HTTPRequest
@@ -282,6 +283,7 @@ final class UpdateChecker: ObservableObject {
         self.currentVersion = currentVersion == "local" ? BuildInfo.marketingVersion : currentVersion
         self.automaticChecksAvailable = releaseTag != "local" && mockRelease == nil
         self.manualChecksEnabled = mockRelease == nil
+        self.usesMockRelease = mockRelease != nil
         self.defaults = defaults
         self.now = now
         self.request = request
@@ -611,7 +613,8 @@ final class UpdateChecker: ObservableObject {
         )
         suppressedUpdate = suppression
         suppressionGeneration += 1
-        if let data = try? JSONEncoder().encode(suppression) {
+        if usesMockRelease == false,
+           let data = try? JSONEncoder().encode(suppression) {
             defaults.set(data, forKey: Self.suppressedUpdateKey)
         }
         availableRelease = nil

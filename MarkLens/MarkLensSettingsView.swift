@@ -14,6 +14,11 @@ struct MarkLensSettingsView: View {
                     Label("Content & Privacy", systemImage: "lock.shield")
                 }
 
+            NavigationSettingsView()
+                .tabItem {
+                    Label("Navigation", systemImage: "arrow.left.arrow.right")
+                }
+
             FolderAccessSettingsView()
                 .tabItem {
                     Label("Files & Folders", systemImage: "folder")
@@ -24,7 +29,7 @@ struct MarkLensSettingsView: View {
                     Label("Updates", systemImage: "arrow.triangle.2.circlepath")
                 }
         }
-        .frame(width: 600, height: 460)
+        .frame(width: 680, height: 600)
     }
 }
 

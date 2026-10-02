@@ -86,6 +86,11 @@ final class MarkLensUITests: XCTestCase {
         link.rightClick()
         let newTab = app.menuItems["Open in New Tab"].firstMatch
         XCTAssertTrue(newTab.waitForExistence(timeout: 5))
+        XCTAssertLessThan(
+            abs(newTab.frame.midY - link.frame.midY),
+            120,
+            "The link context menu should appear beside the clicked link."
+        )
         newTab.click()
         let targetWindow = app.windows["target.md"].firstMatch
         XCTAssertTrue(targetWindow.waitForExistence(timeout: 5), app.debugDescription)
@@ -598,30 +603,17 @@ private struct MarkLensAppHandle {
         )
         XCTAssertEqual(
             notesWindow.title,
-            "What’s New in MarkLens",
+            "MarkLens Release Notes",
             "Expected the native release-notes window title."
         )
         XCTAssertTrue(
             notesWindow.staticTexts["1.7.0"].firstMatch.waitForExistence(timeout: 5),
             "Expected the current changelog section."
         )
-        XCTAssertTrue(
-            notesWindow.buttons["Done"].firstMatch.waitForExistence(timeout: 5),
-            "Expected the Done action."
-        )
         if includesPreviousRelease {
-            XCTAssertTrue(
-                notesWindow.staticTexts["Updated from MarkLens 1.5.0"].firstMatch.exists,
-                "Expected the previous installed version."
-            )
             XCTAssertTrue(
                 notesWindow.staticTexts["1.6.0"].firstMatch.waitForExistence(timeout: 5),
                 "Expected an intervening changelog section."
-            )
-        } else {
-            XCTAssertTrue(
-                notesWindow.staticTexts["Changes in MarkLens 1.7.0"].firstMatch.exists,
-                "Expected the installed release context."
             )
         }
     }
@@ -629,8 +621,8 @@ private struct MarkLensAppHandle {
     func openInstalledReleaseNotesFromHelp() {
         let helpMenu = app.menuBars.menuBarItems["Help"].firstMatch
         helpMenu.click()
-        let menuItem = helpMenu.menus.menuItems["What’s New in MarkLens"].firstMatch
-        XCTAssertTrue(menuItem.waitForExistence(timeout: 5), "Expected the What’s New Help command.")
+        let menuItem = helpMenu.menus.menuItems["Complete Changelog"].firstMatch
+        XCTAssertTrue(menuItem.waitForExistence(timeout: 5), "Expected the Complete Changelog Help command.")
         menuItem.click()
     }
 
@@ -642,12 +634,8 @@ private struct MarkLensAppHandle {
         )
         XCTAssertEqual(
             notesWindow.title,
-            "What’s New in MarkLens",
+            "MarkLens Release Notes",
             "Expected the native changelog window title."
-        )
-        XCTAssertTrue(
-            notesWindow.staticTexts["Complete changelog"].firstMatch.exists,
-            "Expected the complete changelog context."
         )
         XCTAssertTrue(
             notesWindow.staticTexts["1.8.1"].firstMatch

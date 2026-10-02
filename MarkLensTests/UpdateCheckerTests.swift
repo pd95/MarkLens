@@ -1210,6 +1210,27 @@ final class UpdateCheckerTests: XCTestCase {
         )
 
     }
+
+    func testDebugMockUpdateChoiceDoesNotPersistIntoNormalLaunch() {
+        let defaults = makeDefaults()
+        let mockChecker = UpdateChecker(
+            currentVersion: "1.8.1",
+            releaseTag: "local",
+            defaults: defaults,
+            environment: ["MARKLENS_MOCK_UPDATE_VERSION": "99.0.0"]
+        )
+
+        mockChecker.checkLater()
+        XCTAssertEqual(mockChecker.activeSuppression?.displayVersion, "99.0.0")
+
+        let normalChecker = UpdateChecker(
+            currentVersion: "1.8.1",
+            releaseTag: "local",
+            defaults: defaults,
+            environment: [:]
+        )
+        XCTAssertNil(normalChecker.activeSuppression)
+    }
     #endif
 
     func testFailuresUntrustedURLsAndNonStableReleasesAreIgnored() async {

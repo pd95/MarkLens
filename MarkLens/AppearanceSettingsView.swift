@@ -7,49 +7,55 @@ struct AppearanceSettingsView: View {
     @State private var isRestoreConfirmationPresented = false
 
     var body: some View {
-        Form {
-            Section("Custom CSS") {
-                Text(
-                    "Override MarkLens fonts, sizes, colors, and layout with CSS. "
-                        + "Changes apply immediately to open previews."
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Custom CSS")
+                .font(.headline)
+
+            Text(
+                "Override MarkLens fonts, sizes, colors, and layout with CSS. "
+                    + "Changes apply immediately to open previews."
+            )
+                .font(.callout)
+                .foregroundStyle(.secondary)
+
+            TextEditor(text: $customCSS)
+                .font(.system(.body, design: .monospaced))
+                .scrollContentBackground(.hidden)
+                .padding(6)
+                .background(.background)
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 6)
+                        .stroke(.quaternary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .accessibilityLabel("Custom CSS")
+                .accessibilityHint(
+                    "CSS applies immediately to open previews. Invalid rules are ignored."
                 )
-                    .font(.callout)
+                .accessibilityIdentifier("customCSSEditor")
+
+            HStack {
+                Text(customCSS == AppearancePreferences.starterCSS
+                    ? "Starter styles are already in use."
+                    : "Invalid CSS rules are ignored by the preview.")
+                    .font(.footnote)
                     .foregroundStyle(.secondary)
 
-                TextEditor(text: $customCSS)
-                    .font(.system(.body, design: .monospaced))
-                    .scrollContentBackground(.hidden)
-                    .padding(6)
-                    .background(.background)
-                    .clipShape(RoundedRectangle(cornerRadius: 6))
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 6)
-                            .stroke(.quaternary)
-                    }
-                    .frame(height: 200)
-                    .accessibilityLabel("Custom CSS")
-                    .accessibilityHint(
-                        "CSS applies immediately to open previews. Invalid rules are ignored."
-                    )
-                    .accessibilityIdentifier("customCSSEditor")
+                Spacer()
 
-                HStack {
-                    Text("Invalid rules are ignored by the preview.")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-
-                    Spacer()
-
-                    Button("Restore Starter Styles…") {
-                        isRestoreConfirmationPresented = true
-                    }
-                    .disabled(customCSS == AppearancePreferences.starterCSS)
-                    .accessibilityIdentifier("restoreCustomCSSButton")
+                Button("Restore Starter Styles…") {
+                    isRestoreConfirmationPresented = true
                 }
+                .disabled(customCSS == AppearancePreferences.starterCSS)
+                .help(customCSS == AppearancePreferences.starterCSS
+                    ? "Starter styles are already in use."
+                    : "Replace your custom CSS with the starter styles.")
+                .accessibilityIdentifier("restoreCustomCSSButton")
             }
         }
-        .formStyle(.grouped)
-        .padding(.horizontal)
+        .padding(24)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .alert("Restore Starter Styles?", isPresented: $isRestoreConfirmationPresented) {
             Button("Cancel", role: .cancel) {}
             Button("Restore", role: .destructive) {

@@ -152,7 +152,10 @@ final class ReleaseNotesCoordinatorTests: XCTestCase {
             changelogLoader: { Self.changelog }
         )
 
-        XCTAssertEqual(coordinator.notes?.markdown, Self.changelog)
+        XCTAssertEqual(
+            coordinator.notes?.markdown,
+            Self.changelog.replacingOccurrences(of: "# Changelog\n\n", with: "")
+        )
         XCTAssertTrue(coordinator.notes?.showsFullChangelog == true)
         XCTAssertNil(coordinator.notes?.previousReleaseTag)
         XCTAssertFalse(coordinator.shouldPresentAutomatically)

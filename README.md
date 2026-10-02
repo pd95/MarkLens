@@ -9,8 +9,8 @@ View Markdown documents on iOS and macOS, with a Quick Look extension for fast p
 - Raw Markdown editing with toolbar shortcuts, search, and synchronized preview/source scrolling.
 - Local links and images, source-line links, plus wiki-style links and in-app wiki navigation on macOS.
 - Native macOS document tabs, with Command-click or a link’s context menu to open a local Markdown file in a new tab.
-- Remembered macOS document window size and position for each file, with the last window placement used for new files.
-- Browse local Markdown and wiki links in the current window, with a per-file toggle and a configurable default in Files & Folders settings.
+- macOS remembers each document’s window size and position; new files use the default placement.
+- Browse local Markdown and wiki links in the current window, with a per-file toggle and a configurable default in Navigation settings.
 - Choose whether linked documents follow macOS window preferences or open in a new window or tab by default.
 - Customizable preview typography, content width, and CSS on macOS.
 - PDF and portable HTML export bundling app resources and local images on macOS, plus direct paginated review in Preview; remote content remains linked.

@@ -57,7 +57,7 @@ struct ReleaseNotesContentView: View {
 
     private var renderedReleaseNotes: String {
         let context = PipelineContext(
-            title: "What’s New in MarkLens",
+            title: "MarkLens Release Notes",
             rawHTMLPolicy: .escaped,
             allowsRemoteResources: false,
             allowsLocalResources: false

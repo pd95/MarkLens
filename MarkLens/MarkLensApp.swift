@@ -42,11 +42,7 @@ struct MarkLensApp: App {
             ContentView(document: file.document, fileURL: file.fileURL)
 #if os(macOS)
                 .background {
-                    DocumentWindowPlacement(
-                        fileURL: file.fileURL,
-                        isUntitled: file.document.filename == nil,
-                        placement: appDelegate.windowPlacement
-                    )
+                    DocumentWindowFrameAutosaveBridge(fileURL: file.fileURL)
                     .frame(width: 0, height: 0)
                 }
                 .environmentObject(appDelegate.localDocumentAccess)
@@ -111,7 +107,7 @@ struct MarkLensApp: App {
         }
 #endif
 #if os(macOS)
-        Window("What’s New in MarkLens", id: ReleaseNotesCoordinator.windowID) {
+        Window("MarkLens Release Notes", id: ReleaseNotesCoordinator.windowID) {
             if let notes = releaseNotesCoordinator.notes {
                 InstalledReleaseNotesView(notes: notes)
                     .onAppear {
@@ -170,7 +166,7 @@ private struct ReleaseNotesCommands: Commands {
                 coordinator.presentFullChangelog()
                 openWindow(id: ReleaseNotesCoordinator.windowID)
             } label: {
-                Label("What’s New in MarkLens", systemImage: "sparkles")
+                Label("Complete Changelog", systemImage: "text.book.closed")
             }
         }
     }

@@ -1,8 +1,16 @@
 # Changelog
 
+## 1.9.0
+
+- Browse local Markdown and wiki links in the current window. Set the default and choose window or tab behavior in Navigation settings.
+- Open linked documents in native macOS tabs with Command-click or Open in New Tab.
+- Link directly to a Markdown source line, including through `marklens://open` links from other apps. MarkLens scrolls to the rendered line.
+- Reopen document windows at their previous size and position, adjusted to fit smaller displays.
+- Find document navigation in its own Settings tab and linked-image controls in Content & Privacy. The Custom CSS editor now fills the available space in Appearance.
+- Fixed misplaced link context menus and clarified Settings controls.
+
 ## 1.8.1
 
-- Remembered macOS document window size and position per file, including a fallback for new files.
 - Improved YAML frontmatter parsing to preserve standard scalar and collection semantics while making wiki links embedded in text values clickable.
 - Disabled smart punctuation, automatic correction, completion, and text detection in Markdown source editors so typed source remains literal.
 - Fixed document autosaves and external-file refreshes to use the native document lifecycle without false conflict prompts, reload loops from unchanged file events, or silently discarded Update and Cancel choices.

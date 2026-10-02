@@ -10,6 +10,9 @@ struct SecuritySettingsView: View {
     private static let mermaidExplanation =
         "Converts Mermaid code blocks into diagrams using code included with MarkLens. "
         + "No network connection is required."
+    private static let linkedImagesExplanation =
+        "Shows supported images linked from the document. MarkLens may ask for access to the document’s folder "
+        + "when an image needs it."
 
     @AppStorage(SecurityPreferences.rendersRawHTMLKey)
     private var rendersRawHTML = false
@@ -17,6 +20,8 @@ struct SecuritySettingsView: View {
     private var loadsRemoteResources = false
     @AppStorage(SecurityPreferences.rendersMermaidKey)
     private var rendersMermaid = true
+    @AppStorage(SecurityPreferences.loadsLocalImagesKey)
+    private var loadsLocalImages = true
 
     var body: some View {
         Form {
@@ -35,6 +40,16 @@ struct SecuritySettingsView: View {
                     .accessibilityIdentifier("loadsRemoteResourcesToggle")
                     .accessibilityHint(Self.remoteContentExplanation)
                 Text(Self.remoteContentExplanation)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
+            }
+
+            Section("Linked Local Content") {
+                Toggle("Show linked images from this Mac", isOn: $loadsLocalImages)
+                    .accessibilityIdentifier("loadsLocalImagesToggle")
+                    .accessibilityHint(Self.linkedImagesExplanation)
+                Text(Self.linkedImagesExplanation)
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .accessibilityHidden(true)

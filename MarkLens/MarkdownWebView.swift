@@ -992,7 +992,11 @@ struct MarkdownWebView: PlatformViewRepresentable {
             menu.addItem(withTitle: "Open in New Tab", action: #selector(openContextLinkInTab(_:)), keyEquivalent: "").target = self
             menu.addItem(.separator())
             menu.addItem(withTitle: "Copy Link Address", action: #selector(copyContextLink(_:)), keyEquivalent: "").target = self
-            menu.popUp(positioning: nil, at: NSPoint(x: x, y: webView.bounds.height - y), in: webView)
+            let menuPoint = NSPoint(
+                x: webView.bounds.minX + x,
+                y: webView.isFlipped ? webView.bounds.minY + y : webView.bounds.maxY - y
+            )
+            menu.popUp(positioning: nil, at: menuPoint, in: webView)
         }
 
         @objc private func openContextLink(_ sender: Any?) {

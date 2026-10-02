@@ -78,7 +78,7 @@ final class ReleaseNotesCoordinator: ObservableObject {
         let fullChangelogNotes = InstalledReleaseNotes(
             releaseTag: requestedReleaseTag,
             previousReleaseTag: nil,
-            markdown: changelog ?? "Release notes are unavailable.",
+            markdown: Self.displayedChangelog(changelog),
             showsFullChangelog: true
         )
 
@@ -194,6 +194,15 @@ final class ReleaseNotesCoordinator: ObservableObject {
         return try? String(contentsOf: url, encoding: .utf8)
     }
 
+    private static func displayedChangelog(_ changelog: String?) -> String {
+        guard let changelog else { return "Release notes are unavailable." }
+        var lines = changelog.components(separatedBy: .newlines)
+        if lines.first == "# Changelog" {
+            lines.removeFirst()
+        }
+        return lines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     private static func makeNotes(
         changelog: String?,
         releaseTag: String,
@@ -222,48 +231,18 @@ final class ReleaseNotesCoordinator: ObservableObject {
 }
 
 struct InstalledReleaseNotesView: View {
-    @Environment(\.dismissWindow) private var dismissWindow
-
     let notes: InstalledReleaseNotes
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text(releaseNotesContext)
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-
-            Divider()
-
-            ReleaseNotesContentView(
-                markdown: notes.markdown,
-                contentIdentity: notes.contentIdentity,
-                accessibilityLabel: releaseNotesAccessibilityLabel
-            )
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-
-            Divider()
-
-            HStack {
-                Spacer()
-                Button("Done") {
-                    dismissWindow(id: ReleaseNotesCoordinator.windowID)
-                }
-                .keyboardShortcut(.defaultAction)
-                .accessibilityIdentifier("releaseNotesDoneButton")
-            }
-        }
-        .padding()
+        ReleaseNotesContentView(
+            markdown: notes.markdown,
+            contentIdentity: notes.contentIdentity,
+            accessibilityLabel: releaseNotesAccessibilityLabel
+        )
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(.horizontal, 24)
+        .padding(.vertical, 12)
         .frame(minWidth: 520, minHeight: 520)
-    }
-
-    private var releaseNotesContext: String {
-        if notes.showsFullChangelog {
-            return "Complete changelog"
-        }
-        if let previousVersion = notes.previousDisplayVersion {
-            return "Updated from MarkLens \(previousVersion)"
-        }
-        return "Changes in MarkLens \(notes.displayVersion)"
     }
 
     private var releaseNotesAccessibilityLabel: String {

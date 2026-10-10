@@ -3,6 +3,7 @@
 ## 1.9.1
 
 - Fixed automatic preview refresh after repeated external edits and when returning to a tab whose file changed while hidden.
+- Fixed release notes to include the current minor release and all its bugfix releases, while retaining earlier missed changes in automatic upgrade notes.
 
 ## 1.9.0
 

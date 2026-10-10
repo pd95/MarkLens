@@ -85,7 +85,7 @@ final class ReleaseNotesCoordinator: ObservableObject {
         )
         let currentMarkdown = changelog.flatMap { changelog in
             if ReleaseVersion(requestedReleaseTag) != nil {
-                return ReleaseChangelog.changes(in: changelog, for: requestedReleaseTag)
+                return ReleaseChangelog.minorReleaseChanges(in: changelog, for: requestedReleaseTag)
             }
             return ReleaseChangelog.latestChanges(in: changelog)
         }
@@ -229,13 +229,13 @@ final class ReleaseNotesCoordinator: ObservableObject {
     ) -> InstalledReleaseNotes {
         let selectedMarkdown: String?
         if let changelog, let previousReleaseTag {
-            selectedMarkdown = ReleaseChangelog.missedChanges(
+            selectedMarkdown = ReleaseChangelog.minorReleaseChanges(
                 in: changelog,
-                installedVersion: previousReleaseTag,
-                releaseTag: releaseTag
-            ) ?? ReleaseChangelog.changes(in: changelog, for: releaseTag)
+                for: releaseTag,
+                since: previousReleaseTag
+            )
         } else if let changelog {
-            selectedMarkdown = ReleaseChangelog.changes(in: changelog, for: releaseTag)
+            selectedMarkdown = ReleaseChangelog.minorReleaseChanges(in: changelog, for: releaseTag)
         } else {
             selectedMarkdown = nil
         }

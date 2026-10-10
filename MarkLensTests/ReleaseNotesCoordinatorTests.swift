@@ -171,6 +171,101 @@ final class ReleaseNotesCoordinatorTests: XCTestCase {
         XCTAssertTrue(coordinator.notes?.markdown.contains("Old changes") == true)
     }
 
+    func testPatchReleaseNotesIncludeMinorReleaseAndEarlierPatches() throws {
+        let changelog = """
+            ## 1.10.0
+            - Future minor.
+            ## 1.9.3
+            - Future patch.
+            ## 1.9.2
+            - Current patch.
+            ## 1.9.1
+            - Earlier patch.
+            ## 1.9.0
+            - Minor release features.
+            ## 1.8.9
+            - Previous minor.
+            ## 0.9.0
+            - Previous major.
+            """
+        for tag in ["v1.9.2", "v1.9.2-rc1"] {
+            let defaults = makeDefaults()
+            defaults.set("v1.9.1", forKey: ReleaseNotesCoordinator.lastAcknowledgedReleaseKey)
+            let coordinator = ReleaseNotesCoordinator(
+                currentReleaseTag: tag,
+                defaults: defaults,
+                environment: [:],
+                changelogLoader: { changelog }
+            )
+            for presentsHelp in [false, true] {
+                if presentsHelp { coordinator.presentReleaseNotes() }
+                let markdown = try XCTUnwrap(coordinator.notes?.markdown)
+                XCTAssertTrue(markdown.contains("Current patch"))
+                XCTAssertTrue(markdown.contains("Earlier patch"))
+                XCTAssertTrue(markdown.contains("Minor release features"))
+                XCTAssertFalse(markdown.contains("Future"))
+                XCTAssertFalse(markdown.contains("Previous"))
+            }
+        }
+    }
+
+    func testLocalDevelopmentNotesIncludeLatestMinorReleaseSeries() throws {
+        let coordinator = ReleaseNotesCoordinator(
+            currentReleaseTag: "local",
+            defaults: makeDefaults(),
+            environment: [:],
+            changelogLoader: { """
+                ## 1.9.1
+                - Patch changes.
+                ## 1.9.0
+                - Minor features.
+                ## 1.8.1
+                - Older changes.
+                """ }
+        )
+        let markdown = try XCTUnwrap(coordinator.notes?.markdown)
+        XCTAssertTrue(markdown.contains("Patch changes"))
+        XCTAssertTrue(markdown.contains("Minor features"))
+        XCTAssertFalse(markdown.contains("Older changes"))
+    }
+
+    func testUpgradeToPatchIncludesMissedPreviousMinorChangesWhileHelpShowsCurrentMinor() throws {
+        let defaults = makeDefaults()
+        defaults.set("v1.8.0", forKey: ReleaseNotesCoordinator.lastAcknowledgedReleaseKey)
+        let coordinator = ReleaseNotesCoordinator(
+            currentReleaseTag: "v1.9.1",
+            defaults: defaults,
+            environment: [:],
+            changelogLoader: { """
+                ## 1.9.1
+                - Current patch.
+                ## 1.9.0
+                - Current minor features.
+                ## 1.8.1
+                - Missed previous minor patch.
+                ## 1.8.0
+                - Already installed.
+                """ }
+        )
+
+        XCTAssertTrue(coordinator.claimAutomaticPresentation())
+        XCTAssertEqual(coordinator.notes?.previousReleaseTag, "v1.8.0")
+        let automaticNotes = try XCTUnwrap(coordinator.notes?.markdown)
+        XCTAssertTrue(automaticNotes.contains("## 1.9.1"))
+        XCTAssertTrue(automaticNotes.contains("## 1.9.0"))
+        XCTAssertTrue(automaticNotes.contains("## 1.8.1"))
+        XCTAssertFalse(automaticNotes.contains("## 1.8.0"))
+
+        coordinator.acknowledgeCurrentRelease()
+        coordinator.presentReleaseNotes()
+        XCTAssertNil(coordinator.notes?.previousReleaseTag)
+        let helpNotes = try XCTUnwrap(coordinator.notes?.markdown)
+        XCTAssertTrue(helpNotes.contains("## 1.9.1"))
+        XCTAssertTrue(helpNotes.contains("## 1.9.0"))
+        XCTAssertFalse(helpNotes.contains("## 1.8.1"))
+        XCTAssertFalse(helpNotes.contains("## 1.8.0"))
+    }
+
     private func makeCoordinator(
         current: String,
         defaults: UserDefaults

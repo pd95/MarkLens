@@ -6,6 +6,12 @@ struct ReleaseVersion: Comparable, Equatable {
     private let components: [Int]
     private let prereleaseIdentifiers: [String]?
 
+    func isInSameMinorRelease(as other: ReleaseVersion) -> Bool {
+        components[0] == other.components[0]
+            && (components.count > 1 ? components[1] : 0)
+                == (other.components.count > 1 ? other.components[1] : 0)
+    }
+
     var isPrerelease: Bool {
         prereleaseIdentifiers != nil
     }

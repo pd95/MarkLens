@@ -12,6 +12,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     let localDocumentAccess = LocalDocumentAccess()
     
     // MARK: - NSApplicationDelegate
+#if DEBUG
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        // Set the actual AppKit appearance; AppleInterfaceStyle does not reliably
+        // change WebKit's prefers-color-scheme when passed as a launch argument.
+        if ProcessInfo.processInfo.environment["MARKLENS_UI_TEST_APPEARANCE"] == "dark" {
+            NSApp.appearance = NSAppearance(named: .darkAqua)
+        }
+    }
+#endif
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         return exitAfterLastWindow
     }

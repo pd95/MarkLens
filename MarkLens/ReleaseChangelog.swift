@@ -33,8 +33,32 @@ enum ReleaseChangelog {
         )
     }
 
+    static func minorReleaseChanges(
+        in markdown: String,
+        for releaseTag: String,
+        since installedVersion: String? = nil
+    ) -> String? {
+        guard let target = ReleaseVersion(baseVersion(from: releaseTag)) else {
+            return nil
+        }
+        let installed = installedVersion.flatMap(ReleaseVersion.init)
+        return joinedMarkdown(from: sections(in: markdown).filter { section in
+            section.version <= target
+                && (section.version.isInSameMinorRelease(as: target)
+                    || installed.map { $0 < section.version } == true)
+        })
+    }
+
     static func latestChanges(in markdown: String) -> String? {
-        sections(in: markdown).first?.markdown
+        let releases = sections(in: markdown)
+        guard let latest = releases.first else { return nil }
+        return minorReleaseChanges(from: releases, through: latest.version)
+    }
+
+    private static func minorReleaseChanges(from releases: [Section], through target: ReleaseVersion) -> String? {
+        joinedMarkdown(from: releases.filter {
+            $0.version.isInSameMinorRelease(as: target) && $0.version <= target
+        })
     }
 
     private static func sections(in markdown: String) -> [Section] {

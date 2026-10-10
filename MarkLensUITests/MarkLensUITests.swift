@@ -426,6 +426,7 @@ final class MarkLensUITests: XCTestCase {
         )
         preview.openReleaseNotesFromHelp()
         preview.verifyCurrentReleaseNotes(version: "1.9.0")
+        preview.verifyCurrentReleaseNotes(version: "1.9.1")
         preview.openChangelogFromHelp()
         preview.verifyCompleteChangelog()
         capture(app, name: "debug-complete-changelog-window")
@@ -434,14 +435,12 @@ final class MarkLensUITests: XCTestCase {
     @MainActor
     func testFrontMatterCardSupportsDarkMode() throws {
         let app = XCUIApplication()
-        let preview = app.openDocument(
-            named: "frontmatter",
-            fileExtension: "md",
-            additionalLaunchArguments: ["-AppleInterfaceStyle", "Dark"]
-        )
+        app.launchEnvironment["MARKLENS_UI_TEST_APPEARANCE"] = "dark"
+        let preview = app.openDocument(named: "frontmatter", fileExtension: "md")
         defer { preview.terminate() }
 
         preview.verifyFrontMatterCard()
+        try preview.verifyDarkPreviewBackground()
         capture(preview.window, name: "frontmatter-dark-mode")
     }
 
@@ -806,6 +805,28 @@ private struct MarkLensAppHandle {
         XCTAssertTrue(
             notesWindow.staticTexts["1.0.4"].firstMatch.waitForExistence(timeout: 5),
             "Expected the entire bundled changelog, including its oldest section."
+        )
+    }
+
+    func verifyDarkPreviewBackground() throws {
+        let webView = window.webViews.firstMatch
+        XCTAssertTrue(webView.waitForExistence(timeout: 5))
+        let bitmap = try XCTUnwrap(NSBitmapImageRep(data: webView.screenshot().pngRepresentation))
+        var brightness: [CGFloat] = []
+        // Sample across the rendered page so text and borders cannot determine the result.
+        for row in 1...9 {
+            for column in 1...9 {
+                let color = try XCTUnwrap(
+                    bitmap.colorAt(x: bitmap.pixelsWide * column / 10, y: bitmap.pixelsHigh * row / 10)?
+                        .usingColorSpace(.deviceRGB)
+                )
+                brightness.append((color.redComponent + color.greenComponent + color.blueComponent) / 3)
+            }
+        }
+        brightness.sort()
+        XCTAssertLessThan(
+            brightness[brightness.count / 2], 0.5,
+            "Expected a dark rendered preview background; launch arguments alone do not prove dark mode."
         )
     }
 

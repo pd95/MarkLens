@@ -996,7 +996,10 @@ struct ContentView: View {
         }
 
         externalDocumentReloadCoordinator = ExternalDocumentReloadCoordinator(fileURL: fileURL)
-        externalFileMonitor = ExternalFileMonitor(fileURL: fileURL) {
+        externalFileMonitor = ExternalFileMonitor(
+            fileURL: fileURL,
+            expectedContents: Data(document.text.utf8)
+        ) {
             handleExternalFileChange()
         }
     }
@@ -1296,7 +1299,8 @@ struct ContentView: View {
         if let page = wikiNavigation.currentPage {
             return "wiki:\(page.id.uuidString)"
         }
-        return "root:\(document.renderRevision)"
+        // A disk reload creates a new document whose render revision starts at zero.
+        return "root:\(document.instanceID.uuidString):\(document.renderRevision)"
     }
 
     private var isWikiNavigationLoading: Bool {

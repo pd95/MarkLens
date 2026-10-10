@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.9.1
+
+- Fixed automatic preview refresh after repeated external edits and when returning to a tab whose file changed while hidden.
+
 ## 1.9.0
 
 - Browse local Markdown and wiki links in the current window. Set the default and choose window or tab behavior in Navigation settings.

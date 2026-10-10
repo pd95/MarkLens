@@ -21,6 +21,50 @@ final class ExternalFileMonitorTests: XCTestCase {
         monitor.stop()
     }
 
+    func testSignalsChangeAlreadyOnDiskWhenMonitorRestarts() throws {
+        let fixture = try MonitorFixture(initialText: "Updated while tab was inactive")
+        defer { fixture.remove() }
+
+        let changed = expectation(description: "missed tab change signal")
+        let monitor = ExternalFileMonitor(
+            fileURL: fixture.fileURL,
+            timing: ExternalFileMonitor.Timing(
+                quietPeriod: .milliseconds(100),
+                maximumDelay: .milliseconds(350),
+                reconnectDelay: .milliseconds(50)
+            ),
+            expectedContents: Data("Previously displayed".utf8)
+        ) {
+            changed.fulfill()
+        }
+
+        wait(for: [changed], timeout: 2)
+        monitor.stop()
+    }
+
+    func testIgnoresUnchangedFileWhenMonitorRestarts() throws {
+        let text = "Already displayed"
+        let fixture = try MonitorFixture(initialText: text)
+        defer { fixture.remove() }
+
+        let changed = expectation(description: "unchanged tab signal")
+        changed.isInverted = true
+        let monitor = ExternalFileMonitor(
+            fileURL: fixture.fileURL,
+            timing: ExternalFileMonitor.Timing(
+                quietPeriod: .milliseconds(100),
+                maximumDelay: .milliseconds(350),
+                reconnectDelay: .milliseconds(50)
+            ),
+            expectedContents: Data(text.utf8)
+        ) {
+            changed.fulfill()
+        }
+
+        wait(for: [changed], timeout: 0.5)
+        monitor.stop()
+    }
+
     func testSignalsContentReplacementThatPreservesModificationDate() throws {
         let fixture = try MonitorFixture(initialText: "Before")
         defer { fixture.remove() }

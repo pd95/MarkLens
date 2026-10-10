@@ -37,15 +37,19 @@ final class ExternalFileMonitor {
     init(
         fileURL: URL,
         timing: Timing = .standard,
+        expectedContents: Data? = nil,
         changeHandler: @escaping ChangeHandler
     ) {
         self.fileURL = fileURL.standardizedFileURL
         self.changeHandler = changeHandler
         self.timing = timing
-        observedContents = try? Data(contentsOf: self.fileURL)
+        observedContents = expectedContents ?? (try? Data(contentsOf: self.fileURL))
 
         if installSource() == false {
             scheduleReconnect()
+        }
+        if expectedContents != nil {
+            recordDetectedChange()
         }
     }
 

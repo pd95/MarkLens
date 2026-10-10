@@ -16,6 +16,8 @@ import os
 final class MarkdownDocument: ReferenceFileDocument {
     typealias Snapshot = String
 
+    let instanceID = UUID()
+
     @Published private(set) var text: String
     @Published private(set) var renderedHTML: String
     @Published private(set) var renderedResources: [HTMLResource]

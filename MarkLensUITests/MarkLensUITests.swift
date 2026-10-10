@@ -99,6 +99,86 @@ final class MarkLensUITests: XCTestCase {
     }
 
     @MainActor
+    func testSelectedTabRefreshesRepeatedExternalFileChanges() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("MarkLensTabRefreshUITest-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let source = directory.appendingPathComponent("source.md")
+        let target = directory.appendingPathComponent("target.md")
+        try "# Before\n\n[Target](target.md)".write(to: source, atomically: true, encoding: .utf8)
+        try "# Target".write(to: target, atomically: true, encoding: .utf8)
+
+        let app = XCUIApplication()
+        app.launchArguments = ["-ApplePersistenceIgnoreState", "YES"]
+        app.open(source)
+        defer { app.terminate() }
+
+        let sourceWindow = app.windows["source.md"].firstMatch
+        XCTAssertTrue(sourceWindow.waitForExistence(timeout: 5))
+        let link = sourceWindow.webViews.links["Target"].firstMatch
+        XCTAssertTrue(link.waitForExistence(timeout: 10))
+        link.rightClick()
+        let newTab = app.menuItems["Open in New Tab"].firstMatch
+        XCTAssertTrue(newTab.waitForExistence(timeout: 5))
+        newTab.click()
+        let targetWindow = app.windows["target.md"].firstMatch
+        XCTAssertTrue(targetWindow.isHittable)
+
+        try "# Target Updated".write(to: target, atomically: true, encoding: .utf8)
+        XCTAssertTrue(
+            targetWindow.webViews.staticTexts["Target Updated"].firstMatch.waitForExistence(timeout: 8),
+            "Expected the selected tab to show the external edit."
+        )
+
+        try "# Target Updated Again".write(to: target, atomically: true, encoding: .utf8)
+        XCTAssertTrue(
+            targetWindow.webViews.staticTexts["Target Updated Again"].firstMatch.waitForExistence(timeout: 8),
+            "Expected the selected tab to keep refreshing after another external edit."
+        )
+    }
+
+    @MainActor
+    func testHiddenTabRefreshesAfterExternalFileChange() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("MarkLensHiddenTabRefreshUITest-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let source = directory.appendingPathComponent("source.md")
+        let target = directory.appendingPathComponent("target.md")
+        try "# Before\n\n[Target](target.md)".write(to: source, atomically: true, encoding: .utf8)
+        try "# Target".write(to: target, atomically: true, encoding: .utf8)
+
+        let app = XCUIApplication()
+        app.launchArguments = ["-ApplePersistenceIgnoreState", "YES"]
+        app.open(source)
+        defer { app.terminate() }
+
+        let sourceWindow = app.windows["source.md"].firstMatch
+        XCTAssertTrue(sourceWindow.waitForExistence(timeout: 5))
+        let link = sourceWindow.webViews.links["Target"].firstMatch
+        XCTAssertTrue(link.waitForExistence(timeout: 10))
+        link.rightClick()
+        let newTab = app.menuItems["Open in New Tab"].firstMatch
+        XCTAssertTrue(newTab.waitForExistence(timeout: 5))
+        newTab.click()
+        let targetWindow = app.windows["target.md"].firstMatch
+        XCTAssertTrue(targetWindow.isHittable)
+
+        try "# After\n\n[Target](target.md)".write(to: source, atomically: true, encoding: .utf8)
+        let sourceTab = targetWindow.tabGroups.tabs["source.md"].firstMatch
+        XCTAssertTrue(sourceTab.waitForExistence(timeout: 5))
+        sourceTab.click()
+
+        let refreshedHeading = sourceWindow.webViews.staticTexts["After"].firstMatch
+        XCTAssertTrue(
+            refreshedHeading.waitForExistence(timeout: 8),
+            "Expected the source tab to show the external edit when selected again."
+        )
+        XCTAssertTrue(refreshedHeading.isHittable)
+    }
+
+    @MainActor
     func testOpenInWindowKeepsDocumentSeparateAndReusesIt() throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("MarkLensWindowUITest-\(UUID().uuidString)", isDirectory: true)

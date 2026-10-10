@@ -1,4 +1,5 @@
 .DS_Store
+.xcode-sync
 
 # Xcode user data and local state
 *.xcuserstate

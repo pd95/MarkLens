@@ -180,6 +180,10 @@ struct ContentView: View {
     @StateObject private var wikiNavigation: WikiNavigationModel
     let fileURL: URL?
 #if os(macOS)
+    @AppStorage(LinkedFileOpenPreference.key)
+    private var storedLinkedFileOpenPreference = LinkedFileAction.revealInFinder.rawValue
+    @AppStorage(LinkedFileOpenPreference.commandClickKey)
+    private var storedLinkedFileCommandClickPreference = LinkedFileAction.quickLook.rawValue
     @State private var pendingLocalAccessRequest: LocalAccessRequest?
     @State private var externalFileMonitor: ExternalFileMonitor?
     @State private var wikiFileMonitor: ExternalFileMonitor?
@@ -284,7 +288,11 @@ struct ContentView: View {
 #if os(macOS)
         .overlay(alignment: .bottomLeading) {
             if !isRawEditing,
-               let annotation = hoveredLink?.annotation(documentURL: displayedURL, navigatesInPlace: viewModeEnabled) {
+               let annotation = hoveredLink?.annotation(
+                   documentURL: displayedURL,
+                   navigatesInPlace: viewModeEnabled,
+                   fileOpenPreference: linkedFileOpenPreference
+               ) {
                 LinkDestinationStatus(annotation: annotation)
                     .padding(12)
                     .allowsHitTesting(false)
@@ -755,6 +763,7 @@ struct ContentView: View {
             resources: displayedResources,
             customCSS: customCSS,
             documentURL: displayedURL,
+            fileOpenPreference: linkedFileOpenPreference,
             openDocument: openLocalDocument,
             openWikiLink: openWikiLink,
             revealWikiLink: { target in
@@ -770,6 +779,15 @@ struct ContentView: View {
             previewWikiLink: { target in
 #if os(macOS)
                 resolveWikiLink(target, action: .quickLook)
+#endif
+            },
+            openFileInDefaultApp: { url in
+#if os(macOS)
+                NSWorkspace.shared.open(url, configuration: .init()) { _, error in
+                    if let error {
+                        Task { @MainActor in localDocumentError = error.localizedDescription }
+                    }
+                }
 #endif
             },
             linkHoverChanged: { link in
@@ -1371,6 +1389,17 @@ struct ContentView: View {
         wikiNavigation.isForegroundLoading || isResolvingWikiLink
 #else
         wikiNavigation.isForegroundLoading
+#endif
+    }
+
+    private var linkedFileOpenPreference: LinkedFileOpenPreference {
+#if os(macOS)
+        LinkedFileOpenPreference(
+            clickAction: LinkedFileAction(rawValue: storedLinkedFileOpenPreference) ?? .revealInFinder,
+            commandClickAction: LinkedFileAction(rawValue: storedLinkedFileCommandClickPreference) ?? .quickLook
+        )
+#else
+        .init()
 #endif
     }
 

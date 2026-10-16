@@ -36,6 +36,7 @@ final class LinkedFileUITests: XCTestCase {
             XCTAssertTrue(app.menuItems["Copy Link Address"].firstMatch.exists)
             XCTAssertEqual(app.menuItems["Open in New Tab"].firstMatch.exists, ["Markdown", "Notes"].contains(label))
             XCTAssertTrue(app.menuItems["Quick Look"].firstMatch.exists)
+            XCTAssertEqual(app.menuItems["Open in Default App"].firstMatch.exists, ["Image", "PDF", "Folder"].contains(label))
             if label == "Image" { capture(app, name: "linked-image-context-menu") }
             app.typeKey(.escape, modifierFlags: [])
         }
@@ -108,6 +109,155 @@ final class LinkedFileUITests: XCTestCase {
     }
 
     @MainActor
+    func testUpwardMarkdownClicksReachNativeOpeningAndTabHandling() throws {
+        let directory = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let nested = directory.appendingPathComponent("docs/nested", isDirectory: true)
+        try FileManager.default.createDirectory(at: nested, withIntermediateDirectories: true)
+        let source = nested.appendingPathComponent("source.md")
+        let target = directory.appendingPathComponent("parent.md")
+        try "# Source\n\n[Parent](../../parent.md)".write(to: source, atomically: true, encoding: .utf8)
+        try "# Parent target".write(to: target, atomically: true, encoding: .utf8)
+        let app = open(source)
+        defer { app.terminate() }
+        let window = app.windows["source.md"].firstMatch
+        XCTAssertTrue(window.waitForExistence(timeout: 5))
+        let targetWindow = app.windows["parent.md"].firstMatch
+        for commandKey in [false, true] {
+            app.activate()
+            window.click()
+            let link = window.webViews.links["Parent"].firstMatch
+            XCTAssertTrue(link.waitForExistence(timeout: 5))
+            if commandKey {
+                XCUIElement.perform(withKeyModifiers: .command) { link.click() }
+            } else {
+                link.click()
+            }
+            let handled = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                targetWindow.exists || window.sheets.firstMatch.exists
+            }, object: nil)
+            XCTAssertEqual(XCTWaiter.wait(for: [handled], timeout: 8), .completed, app.debugDescription)
+            if targetWindow.exists {
+                XCTAssertTrue(targetWindow.webViews.staticTexts["Parent target"].firstMatch.waitForExistence(timeout: 5))
+                app.typeKey("w", modifierFlags: .command)
+                XCTAssertTrue(targetWindow.waitForNonExistence(timeout: 5))
+            } else {
+                let sheet = window.sheets.firstMatch
+                let explanation = sheet.staticTexts.matching(
+                    NSPredicate(format: "label CONTAINS %@ OR value CONTAINS %@", "parent.md", "parent.md")
+                ).firstMatch
+                XCTAssertTrue(explanation.exists, "A sandboxed target must reach the native file-access flow.")
+                let cancel = sheet.buttons["Cancel"].firstMatch
+                XCTAssertTrue(cancel.exists)
+                cancel.click()
+                XCTAssertTrue(sheet.waitForNonExistence(timeout: 5))
+            }
+        }
+    }
+
+    @MainActor
+    func testQuickLookClickAndFinderCommandClick() throws {
+        try verifyConfiguredFileActions(clickAction: "quickLook", commandAction: "revealInFinder")
+    }
+
+    @MainActor
+    func testFinderClickAndQuickLookCommandClick() throws {
+        try verifyConfiguredFileActions(clickAction: "revealInFinder", commandAction: "quickLook")
+    }
+
+    @MainActor
+    func testDefaultAppClicksOpenTargetsOutsidePreviewReadAccess() throws {
+        let directory = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let sourceDirectory = directory.appendingPathComponent("preview", isDirectory: true)
+        try FileManager.default.createDirectory(at: sourceDirectory, withIntermediateDirectories: true)
+        let source = sourceDirectory.appendingPathComponent("source.md")
+        let target = directory.appendingPathComponent("MarkLens-External-\(UUID().uuidString).txt")
+        try "Read-only fixture for opening a linked file in its default application."
+            .write(to: target, atomically: true, encoding: .utf8)
+        try "# Source\n\n[Text](../\(target.lastPathComponent))"
+            .write(to: source, atomically: true, encoding: .utf8)
+        let applicationURL = try XCTUnwrap(NSWorkspace.shared.urlForApplication(toOpen: target))
+        let bundleIdentifier = try XCTUnwrap(Bundle(url: applicationURL)?.bundleIdentifier)
+        let externalApp = XCUIApplication(bundleIdentifier: bundleIdentifier)
+        let externalWindow = externalApp.windows[target.lastPathComponent].firstMatch
+        defer {
+            if externalWindow.exists {
+                externalApp.activate()
+                externalWindow.click()
+                externalApp.typeKey("w", modifierFlags: .command)
+            }
+        }
+        let app = open(source, clickAction: "openInDefaultApp", commandAction: "openInDefaultApp")
+        defer { app.terminate() }
+        let window = app.windows["source.md"].firstMatch
+        XCTAssertTrue(window.waitForExistence(timeout: 5))
+        for commandKey in [false, true] {
+            app.activate()
+            window.click()
+            let link = window.webViews.links["Text"].firstMatch
+            XCTAssertTrue(link.waitForExistence(timeout: 5))
+            link.hover()
+            verifyAnnotation(window.staticTexts["linkDestinationStatus"].firstMatch,
+                             equals: "Open in Default App: ../\(target.lastPathComponent)")
+            if commandKey {
+                XCUIElement.perform(withKeyModifiers: .command) { link.click() }
+            } else {
+                link.click()
+            }
+            XCTAssertTrue(externalWindow.waitForExistence(timeout: 10), "The default app must open \(target.lastPathComponent).")
+            XCTAssertFalse(window.sheets.firstMatch.exists, "Opening externally must not request folder access in MarkLens.")
+            externalWindow.click()
+            externalApp.typeKey("w", modifierFlags: .command)
+            XCTAssertTrue(externalWindow.waitForNonExistence(timeout: 5))
+        }
+    }
+
+    @MainActor
+    func testDefaultAppFailureReportsAnError() throws {
+        let directory = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let source = directory.appendingPathComponent("source.md")
+        try "# Missing target\n\n[Missing](missing.txt)".write(to: source, atomically: true, encoding: .utf8)
+        let app = open(source, clickAction: "openInDefaultApp")
+        defer { app.terminate() }
+        let window = app.windows["source.md"].firstMatch
+        XCTAssertTrue(window.waitForExistence(timeout: 5))
+        let link = window.webViews.links["Missing"].firstMatch
+        XCTAssertTrue(link.waitForExistence(timeout: 5))
+        link.click()
+        let sheet = window.sheets.firstMatch
+        let error = sheet.staticTexts["Unable to Open File"].firstMatch
+        XCTAssertTrue(error.waitForExistence(timeout: 8), app.debugDescription)
+        sheet.buttons["OK"].firstMatch.click()
+        XCTAssertTrue(error.waitForNonExistence(timeout: 5))
+    }
+
+    @MainActor
+    func testHoverTracksCommandWithFindFieldFocusedAndStationaryPointer() throws {
+        let directory = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let source = directory.appendingPathComponent("source.md")
+        try "# Hover modifiers\n\n[JSON](settings.json)".write(to: source, atomically: true, encoding: .utf8)
+        let app = open(source, clickAction: "openInDefaultApp", commandAction: "quickLook")
+        defer { app.terminate() }
+        let window = app.windows["source.md"].firstMatch
+        XCTAssertTrue(window.waitForExistence(timeout: 5))
+        window.click()
+        app.typeKey("f", modifierFlags: .command)
+        XCTAssertTrue(window.textFields["previewFindField"].firstMatch.waitForExistence(timeout: 5))
+        let link = window.webViews.links["JSON"].firstMatch
+        XCTAssertTrue(link.waitForExistence(timeout: 5))
+        link.hover()
+        let status = window.staticTexts["linkDestinationStatus"].firstMatch
+        verifyAnnotation(status, equals: "Open in Default App: settings.json")
+        XCUIElement.perform(withKeyModifiers: .command) {
+            verifyAnnotation(status, equals: "Quick Look: settings.json")
+        }
+        verifyAnnotation(status, equals: "Open in Default App: settings.json")
+    }
+
+    @MainActor
     func testHoverDescribesTheClickActionAndClearsWhenLeavingLink() throws {
         let directory = try makeDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -115,7 +265,10 @@ final class LinkedFileUITests: XCTestCase {
         try "# Hover\n\n[Markdown](notes.md)\n\n[JSON](settings.json)\n\n[Sibling](../shared/settings.json)\n\n[Web](https://example.com/)"
             .write(to: source, atomically: true, encoding: .utf8)
         let app = XCUIApplication()
-        app.launchArguments = ["-ApplePersistenceIgnoreState", "YES", "-DefaultViewModeEnabled", "YES"]
+        app.launchArguments = [
+            "-ApplePersistenceIgnoreState", "YES", "-DefaultViewModeEnabled", "YES",
+            "-LinkedFileOpenPreference", "revealInFinder", "-LinkedFileCommandClickPreference", "quickLook"
+        ]
         app.terminate()
         addTeardownBlock { @MainActor in app.terminate() }
         app.open(source)
@@ -143,6 +296,87 @@ final class LinkedFileUITests: XCTestCase {
         capture(app, name: "link-action-and-destination")
         window.webViews.staticTexts["Hover"].firstMatch.hover()
         XCTAssertTrue(status.waitForNonExistence(timeout: 3))
+    }
+
+    @MainActor
+    private func verifyConfiguredFileActions(clickAction: String, commandAction: String) throws {
+        let directory = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let source = directory.appendingPathComponent("source.md")
+        let target = directory.appendingPathComponent("settings.json")
+        try "# Source\n\n[JSON](settings.json)".write(to: source, atomically: true, encoding: .utf8)
+        try "{\"preview\":true}".write(to: target, atomically: true, encoding: .utf8)
+        let app = open(source, clickAction: clickAction, commandAction: commandAction)
+        defer { app.terminate() }
+        let window = app.windows["source.md"].firstMatch
+        XCTAssertTrue(window.waitForExistence(timeout: 5))
+        let finder = XCUIApplication(bundleIdentifier: "com.apple.finder")
+        let finderWindow = finder.windows[directory.lastPathComponent].firstMatch
+        defer {
+            if finderWindow.exists {
+                finder.activate()
+                finderWindow.click()
+                finder.typeKey("w", modifierFlags: .command)
+            }
+        }
+        let link = window.webViews.links["JSON"].firstMatch
+        for commandKey in [false, true] {
+            app.activate()
+            window.click()
+            XCTAssertTrue(link.waitForExistence(timeout: 5))
+            link.hover()
+            let status = window.staticTexts["linkDestinationStatus"].firstMatch
+            let defaultTitle = clickAction == "quickLook" ? "Quick Look" : "Reveal in Finder"
+            verifyAnnotation(status, equals: "\(defaultTitle): settings.json")
+            let action = commandKey ? commandAction : clickAction
+            let title = action == "quickLook" ? "Quick Look" : "Reveal in Finder"
+            if commandKey {
+                XCUIElement.perform(withKeyModifiers: .command) {
+                    verifyAnnotation(status, equals: "\(title): settings.json")
+                    link.click()
+                }
+            } else {
+                link.click()
+            }
+            if action == "quickLook" {
+                authorizePreviewIfNeeded(in: app, target: target)
+                let preview = app.windows["Quick Look"].firstMatch
+                XCTAssertTrue(preview.waitForExistence(timeout: 15), app.debugDescription)
+                app.typeKey(.escape, modifierFlags: [])
+                XCTAssertTrue(preview.waitForNonExistence(timeout: 5))
+            } else {
+                XCTAssertTrue(finderWindow.waitForExistence(timeout: 5), finder.debugDescription)
+                let selected = finderWindow.descendants(matching: .any).matching(
+                    NSPredicate(format: "selected == YES AND (label == %@ OR value == %@)", "settings.json", "settings.json")
+                ).firstMatch
+                XCTAssertTrue(selected.waitForExistence(timeout: 5))
+                finderWindow.click()
+                finder.typeKey("w", modifierFlags: .command)
+                XCTAssertTrue(finderWindow.waitForNonExistence(timeout: 5))
+            }
+        }
+    }
+
+    @MainActor
+    private func verifyAnnotation(_ status: XCUIElement, equals text: String) {
+        XCTAssertTrue(status.waitForExistence(timeout: 4))
+        let predicate = NSPredicate(format: "value == %@ OR label == %@", text, text)
+        expectation(for: predicate, evaluatedWith: status)
+        waitForExpectations(timeout: 4)
+        XCTAssertEqual(status.value as? String ?? status.label, text)
+    }
+
+    @MainActor
+    private func authorizePreviewIfNeeded(in app: XCUIApplication, target: URL) {
+        let allow = app.buttons["Allow Access"].firstMatch
+        if allow.waitForExistence(timeout: 3) {
+            app.typeKey("g", modifierFlags: [.command, .shift])
+            app.typeKey("a", modifierFlags: .command)
+            app.typeText(target.path)
+            app.typeKey(.return, modifierFlags: [])
+            XCTAssertTrue(allow.waitForExistence(timeout: 3))
+            allow.click()
+        }
     }
 
     @MainActor
@@ -214,15 +448,7 @@ final class LinkedFileUITests: XCTestCase {
 
         // On a sandboxed launch only source.md may be authorized. Select the
         // linked file itself if access is needed; no folder grant is involved.
-        let allow = app.buttons["Allow Access"].firstMatch
-        if allow.waitForExistence(timeout: 3) {
-            app.typeKey("g", modifierFlags: [.command, .shift])
-            app.typeKey("a", modifierFlags: .command)
-            app.typeText(target.path)
-            app.typeKey(.return, modifierFlags: [])
-            XCTAssertTrue(allow.waitForExistence(timeout: 3))
-            allow.click()
-        }
+        authorizePreviewIfNeeded(in: app, target: target)
 
         let preview = app.windows["Quick Look"].firstMatch
         XCTAssertTrue(preview.waitForExistence(timeout: 15), app.debugDescription)
@@ -253,9 +479,16 @@ final class LinkedFileUITests: XCTestCase {
     }
 
     @MainActor
-    private func open(_ source: URL) -> XCUIApplication {
+    private func open(
+        _ source: URL,
+        clickAction: String = "revealInFinder",
+        commandAction: String = "quickLook"
+    ) -> XCUIApplication {
         let app = XCUIApplication()
-        app.launchArguments = ["-ApplePersistenceIgnoreState", "YES", "-DefaultViewModeEnabled", "NO"]
+        app.launchArguments = [
+            "-ApplePersistenceIgnoreState", "YES", "-DefaultViewModeEnabled", "NO",
+            "-LinkedFileOpenPreference", clickAction, "-LinkedFileCommandClickPreference", commandAction
+        ]
         app.terminate()
         addTeardownBlock { @MainActor in app.terminate() }
         app.open(source)

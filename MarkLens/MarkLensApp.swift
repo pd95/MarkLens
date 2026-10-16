@@ -32,6 +32,7 @@ struct MarkLensApp: App {
 #if os(macOS)
         ViewModePreferences.registerDefaults()
         LinkedDocumentOpenPreference.registerDefaults()
+        LinkedFileOpenPreference.registerDefaults()
 #endif
     }
 

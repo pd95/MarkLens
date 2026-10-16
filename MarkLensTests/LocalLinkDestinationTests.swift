@@ -59,9 +59,9 @@ final class LocalLinkDestinationTests: XCTestCase {
         let coordinator = MarkdownWebView(html: "").makeCoordinator()
         for (path, titles) in [
             ("notes.md", ["Open", "Open in New Tab", "Quick Look", "Reveal in Finder", "Copy Link Address"]),
-            ("photo.png", ["Quick Look", "Reveal in Finder", "Copy Link Address"]),
-            ("report.pdf", ["Quick Look", "Reveal in Finder", "Copy Link Address"]),
-            ("folder/", ["Quick Look", "Reveal in Finder", "Copy Link Address"])
+            ("photo.png", ["Open in Default App", "Quick Look", "Reveal in Finder", "Copy Link Address"]),
+            ("report.pdf", ["Open in Default App", "Quick Look", "Reveal in Finder", "Copy Link Address"]),
+            ("folder/", ["Open in Default App", "Quick Look", "Reveal in Finder", "Copy Link Address"])
         ] {
             let menu = try XCTUnwrap(coordinator.makeLinkContextMenu(for: URL(fileURLWithPath: "/wiki/" + path)))
             XCTAssertEqual(menu.items.filter { !$0.isSeparatorItem }.map(\.title), titles)
@@ -72,7 +72,10 @@ final class LocalLinkDestinationTests: XCTestCase {
     func testRevealAndPreviewDispatchTheCorrectNormalizedURL() throws {
         var previewed: URL?
         var revealed: URL?
-        let coordinator = MarkdownWebView(html: "", previewFile: { previewed = $0 }).makeCoordinator()
+        var openedExternally: URL?
+        let coordinator = MarkdownWebView(
+            html: "", previewFile: { previewed = $0 }, openFileInDefaultApp: { openedExternally = $0 }
+        ).makeCoordinator()
         coordinator.revealFile = { revealed = $0 }
         let link = try XCTUnwrap(URL(string: "file:///wiki/photo.png?download=1#detail"))
         let menu = try XCTUnwrap(coordinator.makeLinkContextMenu(for: link))
@@ -83,7 +86,10 @@ final class LocalLinkDestinationTests: XCTestCase {
         let preview = try XCTUnwrap(menu.item(withTitle: "Quick Look"))
         XCTAssertTrue(NSApp.sendAction(try XCTUnwrap(preview.action), to: preview.target, from: preview))
         XCTAssertEqual(previewed, revealed)
-        XCTAssertFalse(coordinator.revealNonMarkdownLink(URL(string: "https://example.com/photo.png")!))
+        let external = try XCTUnwrap(menu.item(withTitle: "Open in Default App"))
+        XCTAssertTrue(NSApp.sendAction(try XCTUnwrap(external.action), to: external.target, from: external))
+        XCTAssertEqual(openedExternally, revealed)
+        XCTAssertFalse(coordinator.activateNonMarkdownLink(URL(string: "https://example.com/photo.png")!))
     }
 
     @MainActor
@@ -94,12 +100,37 @@ final class LocalLinkDestinationTests: XCTestCase {
         coordinator.revealFile = { revealed.append($0) }
         for path in ["/wiki/settings.json", "/wiki/files/", "/wiki/photo.png", "/wiki/report.pdf"] {
             let url = URL(fileURLWithPath: path)
-            XCTAssertTrue(coordinator.revealNonMarkdownLink(url))
+            XCTAssertTrue(coordinator.activateNonMarkdownLink(url))
             XCTAssertEqual(revealed.last, url.standardizedFileURL)
         }
-        XCTAssertFalse(coordinator.revealNonMarkdownLink(URL(fileURLWithPath: "/wiki/notes.md")))
+        XCTAssertFalse(coordinator.activateNonMarkdownLink(URL(fileURLWithPath: "/wiki/notes.md")))
         XCTAssertFalse(previewed)
         XCTAssertEqual(revealed.count, 4)
+    }
+
+    @MainActor
+    func testNonMarkdownClicksUseTheirConfiguredActions() {
+        for clickAction in LinkedFileAction.allCases {
+            for commandAction in LinkedFileAction.allCases {
+                var received: [(LinkedFileAction, URL)] = []
+                let coordinator = MarkdownWebView(
+                    html: "", fileOpenPreference: .init(clickAction: clickAction, commandClickAction: commandAction),
+                    previewFile: { received.append((.quickLook, $0)) },
+                    openFileInDefaultApp: { received.append((.openInDefaultApp, $0)) }
+                ).makeCoordinator()
+                coordinator.revealFile = { received.append((.revealInFinder, $0)) }
+                for path in ["/wiki/settings.json", "/wiki/files/", "/wiki/photo.png", "/wiki/report.pdf", "/wiki/notes.txt"] {
+                    let url = URL(fileURLWithPath: path)
+                    for commandKey in [false, true] {
+                        received.removeAll()
+                        XCTAssertTrue(coordinator.activateNonMarkdownLink(url, commandKey: commandKey))
+                        XCTAssertEqual(received.count, 1)
+                        XCTAssertEqual(received.first?.0, commandKey ? commandAction : clickAction)
+                        XCTAssertEqual(received.first?.1, url.standardizedFileURL)
+                    }
+                }
+            }
+        }
     }
 
     @MainActor
@@ -197,7 +228,63 @@ final class LocalLinkDestinationTests: XCTestCase {
     }
 
     @MainActor
-    func testClickBridgePreservesMarkdownExternalAndContextClickBehavior() async throws {
+    func testUpwardMarkdownClicksOpenOutsidePreviewReadAccess() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let sourceDirectory = directory.appendingPathComponent("docs/nested", isDirectory: true)
+        try FileManager.default.createDirectory(at: sourceDirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let source = sourceDirectory.appendingPathComponent("preview.html")
+        let target = directory.appendingPathComponent("README.md")
+        let percentTarget = directory.appendingPathComponent("100%.md")
+        for url in [target, percentTarget] { try "# Target".write(to: url, atomically: true, encoding: .utf8) }
+        try """
+            <a id="upward" href="../../README.md"><span>Readme</span></a>
+            <a id="line" href="../../README.md#marklens-line=12">Line</a>
+            <a id="percent" href="../../100%.md">Percent</a>
+            """.write(to: source, atomically: true, encoding: .utf8)
+        let loaded = expectation(description: "The preview loaded with access only to its nested directory")
+        let opened = expectation(description: "Upward Markdown links reach the app without WebKit loading them")
+        opened.expectedFulfillmentCount = 3
+        var destinations: [URL] = []
+        var lines: [Int?] = []
+        var newTabs: [Bool] = []
+        let coordinator = MarkdownWebView(html: "", openDocument: { url, line, inNewTab in
+            destinations.append(url)
+            lines.append(line)
+            newTabs.append(inNewTab)
+            opened.fulfill()
+        }).makeCoordinator()
+        coordinator.revealFile = { _ in XCTFail("Markdown links must open in the app.") }
+        let configuration = MarkdownWebView.makeSecureConfiguration()
+        MarkdownWebView.installLocalFileClickHandling(in: configuration, coordinator: coordinator)
+        let webView = WKWebView(frame: .zero, configuration: configuration)
+        let observer = LinkNavigationObserver(coordinator: coordinator, loaded: loaded)
+        webView.navigationDelegate = observer
+        coordinator.webView = webView
+        coordinator.authorizeInternalLoad()
+        webView.loadFileURL(source, allowingReadAccessTo: sourceDirectory)
+        defer {
+            configuration.userContentController.removeAllScriptMessageHandlers()
+            webView.stopLoading()
+            withExtendedLifetime(observer) {}
+        }
+        await fulfillment(of: [loaded], timeout: 5)
+        _ = try await webView.evaluateJavaScript("document.querySelector('#upward span').click()")
+        _ = try await webView.evaluateJavaScript("""
+            document.getElementById('line').dispatchEvent(new MouseEvent('click', {
+                bubbles: true, cancelable: true, button: 0, metaKey: true
+            }))
+            """)
+        _ = try await webView.evaluateJavaScript("document.getElementById('percent').click()")
+        await fulfillment(of: [opened], timeout: 5)
+        XCTAssertEqual(destinations.map(\.path), [target.path, target.path, percentTarget.path])
+        XCTAssertEqual(lines, [nil, 12, nil])
+        XCTAssertEqual(newTabs, [false, true, false])
+        XCTAssertEqual(observer.actions.count, 1, "Markdown targets must not reach WebKit navigation.")
+    }
+
+    @MainActor
+    func testClickBridgeHandlesMarkdownAndPreservesExternalAndContextClicks() async throws {
         let loaded = expectation(description: "The preview loaded")
         let coordinator = MarkdownWebView(html: "").makeCoordinator()
         coordinator.revealFile = { _ in XCTFail("These actions must not reveal a file.") }
@@ -249,7 +336,60 @@ final class LocalLinkDestinationTests: XCTestCase {
                 });
             })();
             """) as? [Bool]
-        XCTAssertEqual(intercepted, Array(repeating: false, count: 11))
+        XCTAssertEqual(intercepted, Array(repeating: true, count: 5) + Array(repeating: false, count: 6))
+    }
+
+    @MainActor
+    func testSameDocumentAnchorsStayInWebKitAndSourceLinesNavigateInTheApp() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let source = directory.appendingPathComponent("source.md")
+        try "# Source".write(to: source, atomically: true, encoding: .utf8)
+        let loaded = expectation(description: "The source preview loaded")
+        let jumped = expectation(description: "A source-line link navigates in the current document")
+        let coordinator = MarkdownWebView(
+            html: "", documentURL: source, fileOpenPreference: .init(clickAction: .quickLook),
+            openDocument: { _, _, _ in XCTFail("Same-document links must not reopen the file.") },
+            previewFile: { _ in XCTFail("Markdown source links must not invoke Quick Look.") },
+            openCurrentLine: { line in
+                XCTAssertEqual(line, 12)
+                jumped.fulfill()
+            }
+        ).makeCoordinator()
+        let configuration = MarkdownWebView.makeSecureConfiguration()
+        MarkdownWebView.installLocalFileClickHandling(in: configuration, coordinator: coordinator)
+        let webView = WKWebView(frame: .zero, configuration: configuration)
+        let observer = LinkNavigationObserver(coordinator: coordinator, loaded: loaded)
+        webView.navigationDelegate = observer
+        coordinator.webView = webView
+        coordinator.authorizeInternalLoad()
+        webView.loadHTMLString("<a id='probe'>Link</a>", baseURL: source)
+        defer {
+            configuration.userContentController.removeAllScriptMessageHandlers()
+            webView.stopLoading()
+            withExtendedLifetime(observer) {}
+        }
+        await fulfillment(of: [loaded], timeout: 5)
+        let intercepted = try await webView.evaluateJavaScript("""
+            (() => {
+                let intercepted;
+                document.addEventListener('click', event => {
+                    intercepted = event.defaultPrevented;
+                    event.preventDefault();
+                });
+                const link = document.getElementById('probe');
+                return ['#heading', '#', 'source.md#another', '#marklens-line=0', '#marklens-line=12'].map(href => {
+                    link.href = href;
+                    link.dispatchEvent(new MouseEvent('click', {
+                        bubbles: true, cancelable: true, button: 0, metaKey: true
+                    }));
+                    return intercepted;
+                });
+            })();
+            """) as? [Bool]
+        XCTAssertEqual(intercepted, [false, false, false, false, true])
+        await fulfillment(of: [jumped], timeout: 5)
     }
 
     @MainActor

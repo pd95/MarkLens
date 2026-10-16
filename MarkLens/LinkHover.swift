@@ -5,7 +5,11 @@ nonisolated struct LinkHover: Equatable, Sendable {
     var commandKey = false
 
 #if os(macOS)
-    func annotation(documentURL: URL?, navigatesInPlace: Bool) -> String? {
+    func annotation(
+        documentURL: URL?,
+        navigatesInPlace: Bool,
+        fileOpenPreference: LinkedFileOpenPreference = .init()
+    ) -> String? {
         switch LocalLinkDestination(url: url) {
         case .markdown(let fileURL):
             let components = URLComponents(url: url, resolvingAgainstBaseURL: true)
@@ -27,7 +31,8 @@ nonisolated struct LinkHover: Equatable, Sendable {
         case .wiki(let target):
             return openingAction(navigatesInPlace: navigatesInPlace) + "wiki page " + target
         case .file(let fileURL):
-            return "Reveal in Finder: " + displayPath(for: fileURL, relativeTo: documentURL)
+            let action = fileOpenPreference.action(commandKey: commandKey)
+            return action.title + ": " + displayPath(for: fileURL, relativeTo: documentURL)
         case nil:
             switch url.scheme?.lowercased() {
             case "http", "https": return "Open in browser: " + url.absoluteString

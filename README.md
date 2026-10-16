@@ -9,7 +9,7 @@ View Markdown documents on iOS and macOS, with a Quick Look extension for fast p
 - Raw Markdown editing with toolbar shortcuts, search, and synchronized preview/source scrolling.
 - Local links and images, source-line links, plus wiki-style links and in-app wiki navigation on macOS.
 - Native macOS document tabs, with Command-click or a link’s context menu to open a local Markdown file in a new tab.
-- Click local links to navigate to Markdown documents or reveal other files and folders in Finder on macOS.
+- Click local links to navigate to Markdown documents. For other local files and folders on macOS, choose Quick Look, Reveal in Finder, or Open in Default App in Navigation settings, with separate actions for click and Command-click.
 - Peek at local targets with Quick Look from a link’s context menu, including Markdown documents and resolved wiki links. If needed, authorize just the target item.
 - Hover over a link to see its destination and click action at the bottom of the preview, including Command-click behavior. Local paths are relative to the current document’s folder.
 - macOS remembers each document’s window size and position; new files use the default placement.

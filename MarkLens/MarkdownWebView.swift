@@ -27,11 +27,13 @@ struct MarkdownWebView: PlatformViewRepresentable {
     var resources: [HTMLResource]
     var customCSS: String
     var documentURL: URL?
+    var fileOpenPreference: LinkedFileOpenPreference
     var openDocument: (URL, Int?, Bool) async throws -> Void
     var openWikiLink: (String, Bool) -> Void
     var revealWikiLink: (String) -> Void
     var previewFile: (URL) -> Void
     var previewWikiLink: (String) -> Void
+    var openFileInDefaultApp: (URL) -> Void
     var linkHoverChanged: (LinkHover?) -> Void
     var openCurrentLine: (Int) -> Void
     var requestLocalDocumentAccess: (URL, Int?, Bool, String) -> Void
@@ -66,11 +68,13 @@ struct MarkdownWebView: PlatformViewRepresentable {
         resources: [HTMLResource] = [],
         customCSS: String = "",
         documentURL: URL? = nil,
+        fileOpenPreference: LinkedFileOpenPreference = .init(),
         openDocument: @escaping (URL, Int?, Bool) async throws -> Void = { _, _, _ in },
         openWikiLink: @escaping (String, Bool) -> Void = { _, _ in },
         revealWikiLink: @escaping (String) -> Void = { _ in },
         previewFile: @escaping (URL) -> Void = { _ in },
         previewWikiLink: @escaping (String) -> Void = { _ in },
+        openFileInDefaultApp: @escaping (URL) -> Void = { _ in },
         linkHoverChanged: @escaping (LinkHover?) -> Void = { _ in },
         openCurrentLine: @escaping (Int) -> Void = { _ in },
         requestLocalDocumentAccess: @escaping (URL, Int?, Bool, String) -> Void = { _, _, _, _ in },
@@ -101,11 +105,13 @@ struct MarkdownWebView: PlatformViewRepresentable {
         self.resources = resources
         self.customCSS = customCSS
         self.documentURL = documentURL
+        self.fileOpenPreference = fileOpenPreference
         self.openDocument = openDocument
         self.openWikiLink = openWikiLink
         self.revealWikiLink = revealWikiLink
         self.previewFile = previewFile
         self.previewWikiLink = previewWikiLink
+        self.openFileInDefaultApp = openFileInDefaultApp
         self.linkHoverChanged = linkHoverChanged
         self.openCurrentLine = openCurrentLine
         self.requestLocalDocumentAccess = requestLocalDocumentAccess
@@ -195,6 +201,9 @@ struct MarkdownWebView: PlatformViewRepresentable {
         webView.allowsLinkPreview = false
         webView.navigationDelegate = context.coordinator
         context.coordinator.webView = webView
+#if os(macOS)
+        context.coordinator.observeLinkModifiers()
+#endif
         context.coordinator.latestContentVersion = contentVersion
 
 #if DEBUG && os(macOS)
@@ -231,6 +240,7 @@ struct MarkdownWebView: PlatformViewRepresentable {
         view.configuration.userContentController.removeScriptMessageHandler(forName: Self.localFileClickMessageHandler)
         view.configuration.userContentController.removeScriptMessageHandler(forName: Self.linkContextMessageHandler)
         view.configuration.userContentController.removeScriptMessageHandler(forName: Self.linkHoverMessageHandler)
+        coordinator.stopObservingLinkModifiers()
         coordinator.updateLinkHover(nil)
 #endif
         coordinator.searchGeneration += 1
@@ -291,7 +301,10 @@ struct MarkdownWebView: PlatformViewRepresentable {
 #if os(macOS)
         weak var localImageHandler: LocalImageSchemeHandler?
         var revealFile: (URL) -> Void = { NSWorkspace.shared.activateFileViewerSelecting([$0]) }
+        var currentModifierFlags: () -> NSEvent.ModifierFlags = { NSEvent.modifierFlags }
         private var linkHoverGeneration = 0
+        private var currentLinkHover: LinkHover?
+        private var linkModifierMonitor: Any?
 #endif
 
         var isPageReady = false
@@ -475,14 +488,16 @@ struct MarkdownWebView: PlatformViewRepresentable {
                       let value = message.body as? [String: Any],
                       let rawURL = value["href"] as? String,
                       let url = URL(string: rawURL) else { return }
-                revealNonMarkdownLink(url)
+                activateLocalLink(url, inNewTab: value["commandKey"] as? Bool ?? false)
                 return
             }
             if message.name == MarkdownWebView.linkHoverMessageHandler {
                 guard message.frameInfo.isMainFrame, isPageReady,
                       let value = message.body as? [String: Any] else { return }
                 let hover = (value["href"] as? String).flatMap(URL.init(string:)).map {
-                    LinkHover(url: $0, commandKey: value["commandKey"] as? Bool ?? false)
+                    // Native controls can own keyboard focus while the pointer
+                    // remains in the page, leaving JavaScript's flags stale.
+                    LinkHover(url: $0, commandKey: currentModifierFlags().contains(.command))
                 }
                 updateLinkHover(hover)
                 return
@@ -1029,7 +1044,28 @@ struct MarkdownWebView: PlatformViewRepresentable {
         }
 
 #if os(macOS)
+        func observeLinkModifiers() {
+            guard linkModifierMonitor == nil else { return }
+            linkModifierMonitor = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
+                if let self, self.webView?.window?.isKeyWindow == true,
+                   var hover = self.currentLinkHover {
+                    let commandKey = event.modifierFlags.contains(.command)
+                    if hover.commandKey != commandKey {
+                        hover.commandKey = commandKey
+                        self.updateLinkHover(hover)
+                    }
+                }
+                return event
+            }
+        }
+
+        func stopObservingLinkModifiers() {
+            if let linkModifierMonitor { NSEvent.removeMonitor(linkModifierMonitor) }
+            linkModifierMonitor = nil
+        }
+
         func updateLinkHover(_ hover: LinkHover?) {
+            currentLinkHover = hover
             linkHoverGeneration += 1
             let generation = linkHoverGeneration
             // Loading can begin during a SwiftUI view update. Defer the state
@@ -1071,7 +1107,7 @@ struct MarkdownWebView: PlatformViewRepresentable {
                 add("Open", action: #selector(openContextLink(_:)))
                 add("Open in New Tab", action: #selector(openContextLinkInTab(_:)))
             case .file:
-                break
+                add("Open in Default App", action: #selector(openContextLinkInDefaultApp(_:)))
             }
             add("Quick Look", action: #selector(previewContextLink(_:)))
             add("Reveal in Finder", action: #selector(revealContextLink(_:)))
@@ -1100,6 +1136,12 @@ struct MarkdownWebView: PlatformViewRepresentable {
             }
         }
 
+        @objc private func openContextLinkInDefaultApp(_ sender: Any?) {
+            guard let url = (sender as? NSMenuItem)?.representedObject as? URL,
+                  case .file(let fileURL) = LocalLinkDestination(url: url) else { return }
+            parent.openFileInDefaultApp(fileURL)
+        }
+
         @objc private func previewContextLink(_ sender: Any?) {
             guard let url = (sender as? NSMenuItem)?.representedObject as? URL,
                   let destination = LocalLinkDestination(url: url) else { return }
@@ -1117,8 +1159,11 @@ struct MarkdownWebView: PlatformViewRepresentable {
         }
 
         private func activateLocalLink(_ url: URL, inNewTab: Bool) {
-            if revealNonMarkdownLink(url) { return }
-            if url.isFileURL {
+            guard let destination = LocalLinkDestination(url: url) else { return }
+            switch destination {
+            case .file:
+                activateNonMarkdownLink(url, commandKey: inNewTab)
+            case .markdown:
                 guard let documentURL = urlWithoutFragment(url) else { return }
                 if documentURL.standardizedFileURL == parent.documentURL?.standardizedFileURL,
                    let line = sourceLine(in: url) {
@@ -1132,17 +1177,20 @@ struct MarkdownWebView: PlatformViewRepresentable {
                         parent.requestLocalDocumentAccess(documentURL, sourceLine(in: url), inNewTab, error.localizedDescription)
                     }
                 }
-            } else if let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
-                      let target = components.queryItems?.first(where: { $0.name == "target" })?.value {
+            case .wiki(let target):
                 parent.openWikiLink(target, inNewTab)
             }
         }
 
         @discardableResult
-        func revealNonMarkdownLink(_ url: URL) -> Bool {
+        func activateNonMarkdownLink(_ url: URL, commandKey: Bool = false) -> Bool {
             switch LocalLinkDestination(url: url) {
             case .file(let fileURL):
-                revealFile(fileURL)
+                switch parent.fileOpenPreference.action(commandKey: commandKey) {
+                case .revealInFinder: revealFile(fileURL)
+                case .quickLook: parent.previewFile(fileURL)
+                case .openInDefaultApp: parent.openFileInDefaultApp(fileURL)
+                }
                 return true
             default:
                 return false
@@ -1188,7 +1236,7 @@ struct MarkdownWebView: PlatformViewRepresentable {
 #endif
 
 #if os(macOS)
-            if revealNonMarkdownLink(url) {
+            if activateNonMarkdownLink(url, commandKey: inNewTab) {
                 decisionHandler(.cancel)
                 return
             }
@@ -1348,23 +1396,28 @@ struct MarkdownWebView: PlatformViewRepresentable {
     }
 
     // WebKit can reject file navigations before asking the navigation delegate
-    // when the target is outside its read access. Finder only needs the URL.
+    // when the target is outside its read access. Let the app handle local files.
     static let localFileClickScript = """
         (() => {
-            const markdownExtensions = new Set([\(WikiLinkResolver.defaultMarkdownExtensions.sorted().map { "'\($0)'" }.joined(separator: ", "))]);
             document.addEventListener('click', event => {
                 if (event.defaultPrevented || event.button !== 0 || event.ctrlKey) return;
                 const link = event.target instanceof Element ? event.target.closest('a[href]') : null;
                 if (!link) return;
-                const url = new URL(link.href, document.baseURI);
+                let url;
+                try { url = new URL(link.href, document.baseURI); } catch { return; }
                 if (url.protocol !== 'file:' || (url.hostname && url.hostname !== 'localhost')) return;
-                let path = url.pathname;
-                try { path = decodeURIComponent(path); } catch { /* Keep literal percent characters in filenames. */ }
-                const name = path.split('/').pop();
-                const dot = name.lastIndexOf('.');
-                if (dot > 0 && markdownExtensions.has(name.slice(dot + 1).toLowerCase())) return;
+                const fragmentIndex = url.href.indexOf('#');
+                const isSourceLine = /^#marklens-line=[+]?[0-9]+$/.test(url.hash)
+                    && Number(url.hash.slice('#marklens-line='.length)) > 0;
+                if (fragmentIndex !== -1 && !isSourceLine) {
+                    const current = new URL(document.baseURI);
+                    current.hash = '';
+                    if (url.href.slice(0, fragmentIndex) === current.href) return;
+                }
                 event.preventDefault();
-                window.webkit.messageHandlers.marklensLocalFileClick.postMessage({ href: url.href });
+                window.webkit.messageHandlers.marklensLocalFileClick.postMessage({
+                    href: url.href, commandKey: event.metaKey
+                });
             }, true);
         })();
         """

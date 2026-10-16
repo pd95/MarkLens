@@ -3,6 +3,9 @@ import XCTest
 @testable import MarkLens
 
 #if os(macOS)
+import AppKit
+import WebKit
+
 final class LinkHoverTests: XCTestCase {
     func testMarkdownAnnotationReflectsNavigationAndCommandClick() throws {
         let document = URL(fileURLWithPath: "/wiki/source.md")
@@ -21,7 +24,7 @@ final class LinkHoverTests: XCTestCase {
         XCTAssertEqual(wiki.annotation(documentURL: nil, navigatesInPlace: false), "Open wiki page Notes#Heading")
     }
 
-    func testOtherLocalDestinationsDescribeFinderRatherThanQuickLook() throws {
+    func testOtherLocalAnnotationsMatchTheConfiguredAndCommandActions() throws {
         let document = URL(fileURLWithPath: "/wiki/pages/source.md")
         for (path, relativePath) in [
             ("/wiki/settings.json", "../settings.json"),
@@ -33,10 +36,17 @@ final class LinkHoverTests: XCTestCase {
             ("/wiki/pages-extra/settings.json", "../pages-extra/settings.json")
         ] {
             let url = URL(fileURLWithPath: path)
-            for commandKey in [false, true] {
-                let hover = LinkHover(url: url, commandKey: commandKey)
-                XCTAssertEqual(hover.annotation(documentURL: nil, navigatesInPlace: true), "Reveal in Finder: " + url.path)
-                XCTAssertEqual(hover.annotation(documentURL: document, navigatesInPlace: true), "Reveal in Finder: " + relativePath)
+            for clickAction in LinkedFileAction.allCases {
+                for commandAction in LinkedFileAction.allCases {
+                    let preference = LinkedFileOpenPreference(clickAction: clickAction, commandClickAction: commandAction)
+                    for commandKey in [false, true] {
+                        let hover = LinkHover(url: url, commandKey: commandKey)
+                        let action = commandKey ? commandAction : clickAction
+                        let prefix = action.title + ": "
+                        XCTAssertEqual(hover.annotation(documentURL: nil, navigatesInPlace: true, fileOpenPreference: preference), prefix + url.path)
+                        XCTAssertEqual(hover.annotation(documentURL: document, navigatesInPlace: true, fileOpenPreference: preference), prefix + relativePath)
+                    }
+                }
             }
         }
         let encoded = LinkHover(url: try XCTUnwrap(URL(string: "file:///wiki/My%20Notes.json?download=1#section")))
@@ -79,7 +89,10 @@ final class LinkHoverTests: XCTestCase {
         let context = try makeContext()
         context.evaluateScript("emit('mouseover', first); emit('keydown', first, null, true);")
         XCTAssertEqual(try messages(in: context).last?["commandKey"] as? Bool, true)
-        context.evaluateScript("emit('keyup', first); hitElement = second; handlers.scroll({});")
+        context.evaluateScript("emit('keyup', first);")
+        XCTAssertEqual(try messages(in: context).last?["commandKey"] as? Bool, false)
+        XCTAssertEqual(try messages(in: context).last?["href"] as? String, "file:///wiki/Notes.md")
+        context.evaluateScript("hitElement = second; handlers.scroll({});")
         XCTAssertEqual(try messages(in: context).last?["href"] as? String, "file:///wiki/settings.json")
         context.evaluateScript("windowHandlers.blur({});")
         XCTAssertTrue(try messages(in: context).last?["href"] is NSNull)
@@ -87,6 +100,69 @@ final class LinkHoverTests: XCTestCase {
         context.evaluateScript("hitElement = first; handlers.scroll({});")
         XCTAssertEqual(try messages(in: context).count, countAfterExit)
         XCTAssertNil(context.exception)
+    }
+
+    @MainActor
+    func testNativeHoverUsesCurrentModifiersWhenScrollingWithStaleDOMFlags() async throws {
+        let loaded = expectation(description: "The hover page loaded")
+        let first = expectation(description: "First link uses held Command")
+        let second = expectation(description: "Scroll to another link still uses held Command")
+        let released = expectation(description: "A later link uses the released modifier")
+        var heldFlags: NSEvent.ModifierFlags = .command
+        let coordinator = MarkdownWebView(html: "", linkHoverChanged: { hover in
+            guard let hover else { return }
+            switch hover.url.lastPathComponent {
+            case "first.json":
+                XCTAssertTrue(hover.commandKey)
+                first.fulfill()
+            case "second.json":
+                XCTAssertTrue(hover.commandKey)
+                second.fulfill()
+            case "third.json":
+                XCTAssertFalse(hover.commandKey)
+                released.fulfill()
+            default: XCTFail("Unexpected hover destination")
+            }
+        }).makeCoordinator()
+        coordinator.currentModifierFlags = { heldFlags }
+        let configuration = MarkdownWebView.makeSecureConfiguration()
+        configuration.userContentController.add(coordinator, name: "marklensLinkHover")
+        configuration.userContentController.addUserScript(WKUserScript(
+            source: MarkdownWebView.linkHoverScript, injectionTime: .atDocumentEnd, forMainFrameOnly: true
+        ))
+        let webView = WKWebView(frame: .zero, configuration: configuration)
+        let observer = HoverLoadObserver(loaded: loaded)
+        webView.navigationDelegate = observer
+        coordinator.webView = webView
+        webView.loadHTMLString("""
+            <a id="first" href="file:///wiki/first.json">First</a>
+            <a id="second" href="file:///wiki/second.json">Second</a>
+            <a id="third" href="file:///wiki/third.json">Third</a>
+            """, baseURL: nil)
+        defer {
+            configuration.userContentController.removeAllScriptMessageHandlers()
+            webView.stopLoading()
+            withExtendedLifetime(observer) {}
+        }
+        await fulfillment(of: [loaded], timeout: 5)
+        coordinator.isPageReady = true
+        _ = try await webView.evaluateJavaScript("""
+            document.getElementById('first').dispatchEvent(new MouseEvent('mouseover', {
+                bubbles: true, clientX: 10, clientY: 10, metaKey: false
+            }))
+            """)
+        await fulfillment(of: [first], timeout: 3)
+        _ = try await webView.evaluateJavaScript("""
+            document.elementFromPoint = () => document.getElementById('second');
+            document.dispatchEvent(new Event('scroll'));
+            """)
+        await fulfillment(of: [second], timeout: 3)
+        heldFlags = []
+        _ = try await webView.evaluateJavaScript("""
+            document.elementFromPoint = () => document.getElementById('third');
+            document.dispatchEvent(new Event('scroll'));
+            """)
+        await fulfillment(of: [released], timeout: 3)
     }
 
     @MainActor
@@ -137,6 +213,17 @@ final class LinkHoverTests: XCTestCase {
         context.evaluateScript(MarkdownWebView.linkHoverScript)
         XCTAssertNil(context.exception)
         return context
+    }
+}
+
+@MainActor
+private final class HoverLoadObserver: NSObject, WKNavigationDelegate {
+    let loaded: XCTestExpectation
+
+    init(loaded: XCTestExpectation) { self.loaded = loaded }
+
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        loaded.fulfill()
     }
 }
 #endif

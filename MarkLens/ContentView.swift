@@ -13,6 +13,7 @@ import os
 #endif
 #if os(macOS)
 import AppKit
+import QuickLook
 #endif
 
 nonisolated struct DocumentScrollPosition: Equatable, Sendable {
@@ -190,7 +191,7 @@ struct ContentView: View {
     @State private var failedLocalImageURLs: Set<URL> = []
     @State private var wikiLinkMatches: [URL] = []
     @State private var wikiLinkMatchesRoot: URL?
-    @State private var wikiLinkMatchesOpenInTab = false
+    @State private var wikiLinkMatchesAction = WikiLinkAction.open(inNewTab: false)
     @State private var wikiLinkMatchesHeading: String?
     @State private var wikiResolutionGeneration = 0
     @State private var isResolvingWikiLink = false
@@ -200,6 +201,9 @@ struct ContentView: View {
     @State private var preferenceFileURL: URL?
     @State private var hasLoadedViewModePreference = false
     @State private var isDetachingViewMode = false
+    @StateObject private var linkedFilePreview = LinkedFilePreview()
+    @State private var linkedFileAccessPanel: NSOpenPanel?
+    @State private var hoveredLink: LinkHover?
 #endif
     @State private var localDocumentError: String?
     @State private var outputRequest: RenderedDocumentOutputRequest?
@@ -278,6 +282,16 @@ struct ContentView: View {
         }
         .accessibilityIdentifier("contentView")
 #if os(macOS)
+        .overlay(alignment: .bottomLeading) {
+            if !isRawEditing,
+               let annotation = hoveredLink?.annotation(documentURL: displayedURL, navigatesInPlace: viewModeEnabled) {
+                LinkDestinationStatus(annotation: annotation)
+                    .padding(12)
+                    .allowsHitTesting(false)
+                    .accessibilityLabel(annotation)
+                    .accessibilityIdentifier("linkDestinationStatus")
+            }
+        }
         .safeAreaInset(edge: .top, spacing: 0) {
             if isPreviewFindPresented && isRawEditing == false {
                 PreviewFindBar(
@@ -384,7 +398,7 @@ struct ContentView: View {
                 if shouldOfferWikiFolderAccess {
                     ToolbarItem(placement: .primaryAction) {
                         Button {
-                            pendingLocalAccessRequest = .wikiFolder(nil, false)
+                            pendingLocalAccessRequest = .wikiFolder(nil, .open(inNewTab: false))
                         } label: {
                             Label("Allow Wiki Folder Access", systemImage: "folder.badge.plus")
                         }
@@ -622,6 +636,23 @@ struct ContentView: View {
                 await updateChecker.checkIfDue()
             }
         }
+        .quickLookPreview($linkedFilePreview.previewURL)
+        .onChange(of: isRawEditing) {
+            hoveredLink = nil
+        }
+        .onChange(of: linkedFilePreview.accessRequest) {
+            let previousPanel = linkedFileAccessPanel
+            linkedFileAccessPanel = nil
+            previousPanel?.cancel(nil)
+            if let url = linkedFilePreview.accessRequest {
+                chooseLinkedFileForPreview(url)
+            }
+        }
+        .onChange(of: linkedFilePreview.errorDescription) {
+            if let description = linkedFilePreview.errorDescription {
+                localDocumentError = description
+            }
+        }
 #endif
         .onDisappear {
 #if os(macOS)
@@ -633,6 +664,11 @@ struct ContentView: View {
             cancelExternalReloadRetry()
             externalReloadErrorDescription = nil
             cancelWikiResolution()
+            let previousPanel = linkedFileAccessPanel
+            linkedFileAccessPanel = nil
+            previousPanel?.cancel(nil)
+            linkedFilePreview.close()
+            hoveredLink = nil
 #endif
             wikiNavigation.cancelPendingNavigation()
         }
@@ -721,6 +757,26 @@ struct ContentView: View {
             documentURL: displayedURL,
             openDocument: openLocalDocument,
             openWikiLink: openWikiLink,
+            revealWikiLink: { target in
+#if os(macOS)
+                resolveWikiLink(target, action: .revealInFinder)
+#endif
+            },
+            previewFile: { url in
+#if os(macOS)
+                linkedFilePreview.preview(url)
+#endif
+            },
+            previewWikiLink: { target in
+#if os(macOS)
+                resolveWikiLink(target, action: .quickLook)
+#endif
+            },
+            linkHoverChanged: { link in
+#if os(macOS)
+                hoveredLink = link
+#endif
+            },
             openCurrentLine: openCurrentLine,
             requestLocalDocumentAccess: { url, line, inNewTab, errorDescription in
 #if os(macOS)
@@ -792,10 +848,17 @@ struct ContentView: View {
     private var wikiLinkMatchChooser: some View {
         if let root = wikiLinkMatchesRoot {
             WikiLinkMatchChooser(matches: wikiLinkMatches, root: root) { url in
-                let inNewTab = wikiLinkMatchesOpenInTab
+                let action = wikiLinkMatchesAction
                 let heading = wikiLinkMatchesHeading
                 clearWikiLinkMatches()
-                openSelectedWikiDocument(url, wikiRoot: root, heading: heading, inNewTab: inNewTab)
+                switch action {
+                case .open(let inNewTab):
+                    openSelectedWikiDocument(url, wikiRoot: root, heading: heading, inNewTab: inNewTab)
+                case .revealInFinder:
+                    NSWorkspace.shared.activateFileViewerSelecting([url])
+                case .quickLook:
+                    linkedFilePreview.preview(url)
+                }
             }
         } else {
             EmptyView()
@@ -1350,7 +1413,7 @@ struct ContentView: View {
     private var openWikiLink: (String, Bool) -> Void {
         { target, inNewTab in
 #if os(macOS)
-            resolveWikiLink(target, inNewTab: inNewTab)
+            resolveWikiLink(target, action: .open(inNewTab: inNewTab))
 #else
             localDocumentError = "Wiki folder navigation is available on macOS."
 #endif
@@ -1477,6 +1540,33 @@ struct ContentView: View {
     }
 
 #if os(macOS)
+    private func chooseLinkedFileForPreview(_ url: URL) {
+        let panel = NSOpenPanel()
+        panel.title = "Allow Access to Linked Item"
+        panel.message = "Choose \(url.lastPathComponent) to preview it. Access is used to preview this item."
+        panel.prompt = "Allow Access"
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = true
+        panel.canCreateDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.directoryURL = url.deletingLastPathComponent()
+        panel.nameFieldStringValue = url.lastPathComponent
+        linkedFileAccessPanel = panel
+        panel.begin { response in
+            // A newer click or closing the document may have cancelled this panel.
+            guard linkedFileAccessPanel === panel else {
+                if response == .OK { panel.url?.stopAccessingSecurityScopedResource() }
+                return
+            }
+            linkedFileAccessPanel = nil
+            guard response == .OK, let selectedURL = panel.url else {
+                linkedFilePreview.cancelAccessRequest()
+                return
+            }
+            linkedFilePreview.authorize(selectedURL, for: url)
+        }
+    }
+
     private var localAccessFolderURL: URL? {
         guard let request = pendingLocalAccessRequest else { return nil }
         if case .wikiFolder = request {
@@ -1563,9 +1653,9 @@ struct ContentView: View {
                     }
                 case .images:
                     failedLocalImageURLs.removeAll()
-                case .wikiFolder(let target, let inNewTab):
+                case .wikiFolder(let target, let action):
                     if let target {
-                        resolveWikiLink(target, inNewTab: inNewTab)
+                        resolveWikiLink(target, action: action)
                     }
                 }
             } catch {
@@ -1612,16 +1702,13 @@ struct ContentView: View {
         return localDocumentAccess.authorizedFolder(containing: fileURL) == nil
     }
 
-    private func resolveWikiLink(_ target: String, inNewTab: Bool = false) {
-        let parts = target.split(separator: "#", maxSplits: 1, omittingEmptySubsequences: false)
-        let documentTarget = String(parts[0])
-        let heading = parts.count == 2 ? String(parts[1]) : nil
+    private func resolveWikiLink(_ target: String, action: WikiLinkAction) {
         guard let fileURL else {
             localDocumentError = "Save this document before opening wikilinks."
             return
         }
         guard let root = activeWikiRoot(containing: fileURL) else {
-            pendingLocalAccessRequest = .wikiFolder(target, inNewTab)
+            pendingLocalAccessRequest = .wikiFolder(target, action)
             return
         }
 
@@ -1631,22 +1718,13 @@ struct ContentView: View {
         wikiResolutionWork?.cancel()
         let work = Task.detached(priority: .userInitiated) {
             do {
-                let resolver = WikiLinkResolver()
-                let matches = try resolver.matches(
-                    for: documentTarget,
+                let destination = try ResolvedWikiLink.resolve(
+                    target,
                     in: root,
+                    action: action,
                     shouldCancel: { Task.isCancelled }
                 )
-                let line = try heading.flatMap { heading in
-                    try matches.count == 1
-                        ? resolver.sourceLine(
-                            forHeading: heading,
-                            in: matches[0],
-                            shouldCancel: { Task.isCancelled }
-                        )
-                        : nil
-                }
-                return WikiLinkResolution.matches(matches, line)
+                return WikiLinkResolution.matches(destination)
             } catch is CancellationError {
                 return WikiLinkResolution.cancelled
             } catch {
@@ -1662,14 +1740,21 @@ struct ContentView: View {
             wikiResolutionWork = nil
 
             switch resolution {
-            case .matches(let matches, let line):
-                if matches.count == 1, let match = matches.first {
-                    openResolvedWikiDocument(match, wikiRoot: root, line: line, inNewTab: inNewTab)
+            case .matches(let destination):
+                if destination.matches.count == 1, let match = destination.matches.first {
+                    switch action {
+                    case .open(let inNewTab):
+                        openResolvedWikiDocument(match, wikiRoot: root, line: destination.line, inNewTab: inNewTab)
+                    case .revealInFinder:
+                        NSWorkspace.shared.activateFileViewerSelecting([match])
+                    case .quickLook:
+                        linkedFilePreview.preview(match)
+                    }
                 } else {
                     wikiLinkMatchesRoot = root
-                    wikiLinkMatches = matches
-                    wikiLinkMatchesOpenInTab = inNewTab
-                    wikiLinkMatchesHeading = heading
+                    wikiLinkMatches = destination.matches
+                    wikiLinkMatchesAction = action
+                    wikiLinkMatchesHeading = destination.heading
                 }
             case .failure(let description):
                 localDocumentError = description
@@ -1853,7 +1938,7 @@ struct ContentView: View {
     private func clearWikiLinkMatches() {
         wikiLinkMatches = []
         wikiLinkMatchesRoot = nil
-        wikiLinkMatchesOpenInTab = false
+        wikiLinkMatchesAction = .open(inNewTab: false)
         wikiLinkMatchesHeading = nil
     }
 
@@ -1868,7 +1953,7 @@ struct ContentView: View {
 private enum LocalAccessRequest {
     case document(URL, Int?, Bool)
     case images(URL)
-    case wikiFolder(String?, Bool)
+    case wikiFolder(String?, WikiLinkAction)
 
     var targetURL: URL? {
         switch self {
@@ -1886,7 +1971,7 @@ private enum LocalAccessRequest {
 }
 
 private enum WikiLinkResolution: Sendable {
-    case matches([URL], Int?)
+    case matches(ResolvedWikiLink)
     case headingLine(Int)
     case failure(String)
     case cancelled
@@ -1985,6 +2070,28 @@ private extension View {
 }
 
 #if os(macOS)
+private struct LinkDestinationStatus: View {
+    let annotation: String
+
+    var body: some View {
+        if #available(macOS 26.0, *) {
+            label.glassEffect(.regular, in: .capsule)
+        } else {
+            label.background(.regularMaterial, in: Capsule())
+        }
+    }
+
+    private var label: some View {
+        Text(annotation)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+            .truncationMode(.middle)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+    }
+}
+
 private struct PreviewFindBar: View {
     @Binding var text: String
     var statusText: String

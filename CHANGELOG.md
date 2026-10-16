@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.10.0 (Unreleased)
+
+- Reveal linked files and folders in Finder by clicking non-Markdown links, including text, JSON, and images, or choosing Reveal in Finder from a local link’s context menu.
+- Peek at linked files with the Quick Look context action, including Markdown documents and wiki pages, without leaving the current reading position. Press Escape to dismiss the preview.
+- Show each link’s destination and click action in a rounded hover annotation, with local paths relative to the current document’s folder.
+
 ## 1.9.1
 
 - Fixed automatic preview refresh after repeated external edits and when returning to a tab whose file changed while hidden.

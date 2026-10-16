@@ -3,6 +3,54 @@ import XCTest
 @testable import MarkLens
 
 final class ScrollPositionScriptTests: XCTestCase {
+    func testFragmentsMatchExactIDsBeforeNormalizedHeadingIDs() throws {
+        let context = try makeContext(anchors: [
+            anchor(tag: "H2", text: "ABC", line: 10, top: 300, id: "abc"),
+            anchor(tag: "DIV", text: "Explicit anchor", line: 20, top: 800, id: "ABC"),
+            anchor(tag: "DIV", text: "Explicit top anchor", line: 30, top: 1200, id: "TOP")
+        ])
+        context.evaluateScript("window.MarkLensScroll.restore({ request: 1, line: null, fragment: 'ABC', progress: 0 });")
+        XCTAssertNil(context.exception)
+        XCTAssertEqual(context.objectForKeyedSubscript("scrollY")?.toInt32(), 800)
+        context.evaluateScript("window.MarkLensScroll.restore({ request: 2, line: null, fragment: 'TOP', progress: 0 });")
+        XCTAssertEqual(context.objectForKeyedSubscript("scrollY")?.toInt32(), 1200)
+    }
+
+    func testHeadingFragmentsHandleCapitalizationDuplicatesAndNonLatinText() throws {
+        let context = try makeContext(anchors: [
+            anchor(tag: "H2", text: "ABC", line: 10, top: 300, id: "abc"),
+            anchor(tag: "H2", text: "ABC", line: 20, top: 800, id: "abc-1"),
+            anchor(tag: "H2", text: "第一", line: 30, top: 1100, id: "section"),
+            anchor(tag: "H2", text: "第二", line: 40, top: 1400, id: "section-1")
+        ])
+        for (fragment, expected) in [("ABC", 300), ("ABC-1", 800), ("第二", 1400)] {
+            let data = try JSONSerialization.data(withJSONObject: ["fragment": fragment, "line": NSNull(), "progress": 0])
+            let json = try XCTUnwrap(String(data: data, encoding: .utf8))
+            context.evaluateScript("window.MarkLensScroll.restore(\(json));")
+            XCTAssertNil(context.exception)
+            XCTAssertEqual(context.objectForKeyedSubscript("scrollY")?.toInt32(), Int32(expected))
+        }
+    }
+
+    func testMissingFragmentsKeepThePositionAndEmptyFragmentsReturnToTop() throws {
+        let context = try makeContext(anchors: [
+            anchor(tag: "H2", text: "ABC", line: 10, id: "abc"),
+            anchor(tag: "H2", text: "第一", line: 20, top: 1200, id: "section")
+        ])
+        for fragment in ["missing", "不存在", "!!!"] {
+            let data = try JSONSerialization.data(withJSONObject: ["fragment": fragment, "line": NSNull(), "progress": 0])
+            let json = try XCTUnwrap(String(data: data, encoding: .utf8))
+            context.evaluateScript("scrollY = 300; window.MarkLensScroll.restore(\(json));")
+            XCTAssertNil(context.exception)
+            XCTAssertEqual(context.objectForKeyedSubscript("scrollY")?.toInt32(), 300)
+        }
+        context.evaluateScript("window.MarkLensScroll.restore({ fragment: '', line: null, progress: 0 });")
+        XCTAssertEqual(context.objectForKeyedSubscript("scrollY")?.toInt32(), 0)
+        context.evaluateScript("scrollY = 300; window.MarkLensScroll.restore({ fragment: 'TOP', line: null, progress: 0.5 });")
+        XCTAssertNil(context.exception)
+        XCTAssertEqual(context.objectForKeyedSubscript("scrollY")?.toInt32(), 0)
+    }
+
     func testAnchorIdentityRemainsStableWhenRenderedContentMutates() throws {
         let context = try makeContext(anchors: [
             anchor(tag: "DIV", text: "flowchart LR A --> B", line: 20, top: 0)
@@ -421,10 +469,11 @@ final class ScrollPositionScriptTests: XCTestCase {
         top: Int = 1_000,
         height: Int = 20,
         endLine: Int? = nil,
-        rangeFallback: Bool = false
+        rangeFallback: Bool = false,
+        id: String? = nil
     ) -> [String: Any] {
         ["tag": tag, "text": text, "line": line, "top": top, "height": height,
-         "endLine": endLine as Any? ?? NSNull(), "rangeFallback": rangeFallback]
+         "endLine": endLine as Any? ?? NSNull(), "rangeFallback": rangeFallback, "id": id as Any? ?? NSNull()]
     }
 
     private func makeContext(anchors: [[String: Any]]) throws -> JSContext {
@@ -439,6 +488,7 @@ final class ScrollPositionScriptTests: XCTestCase {
         var mockAnchors = anchorSpecs.map(spec => ({
             tagName: spec.tag,
             textContent: spec.text,
+            id: spec.id,
             dataset: {
                 marklensSourceLine: String(spec.line),
                 marklensSourceEndLine: spec.endLine === null ? undefined : String(spec.endLine),
@@ -472,7 +522,14 @@ final class ScrollPositionScriptTests: XCTestCase {
                     remove() { overlayChildren = overlayChildren.filter(child => child !== this); }
                 };
             },
-            querySelectorAll() { return mockAnchors; }
+            getElementById(id) { return mockAnchors.find(element => element.id === id) || null; },
+            getElementsByName() { return []; },
+            querySelectorAll(selector) {
+                if (selector.startsWith('h1[id]')) {
+                    return mockAnchors.filter(element => /^H[1-6]$/.test(element.tagName) && element.id);
+                }
+                return mockAnchors;
+            }
         };
         function getComputedStyle() { return { lineHeight: '24px' }; }
         var window = globalThis;

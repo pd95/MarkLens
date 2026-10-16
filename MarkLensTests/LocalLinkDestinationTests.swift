@@ -371,7 +371,7 @@ final class LocalLinkDestinationTests: XCTestCase {
     }
 
     @MainActor
-    func testSameDocumentAnchorsStayInWebKitAndSourceLinesNavigateInTheApp() async throws {
+    func testSameDocumentFragmentsAndSourceLinesNavigateWithoutReopening() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -379,6 +379,9 @@ final class LocalLinkDestinationTests: XCTestCase {
         try "# Source".write(to: source, atomically: true, encoding: .utf8)
         let loaded = expectation(description: "The source preview loaded")
         let jumped = expectation(description: "A source-line link navigates in the current document")
+        let fragments = expectation(description: "Fragment links navigate in the rendered document")
+        fragments.expectedFulfillmentCount = 4
+        var receivedFragments: [String] = []
         let coordinator = MarkdownWebView(
             html: "", documentURL: source, fileOpenPreference: .init(clickAction: .quickLook),
             openDocument: { _, _, _ in XCTFail("Same-document links must not reopen the file.") },
@@ -386,6 +389,10 @@ final class LocalLinkDestinationTests: XCTestCase {
             openCurrentLine: { line in
                 XCTAssertEqual(line, 12)
                 jumped.fulfill()
+            },
+            openCurrentFragment: { fragment in
+                receivedFragments.append(fragment)
+                fragments.fulfill()
             }
         ).makeCoordinator()
         let configuration = MarkdownWebView.makeSecureConfiguration()
@@ -419,8 +426,34 @@ final class LocalLinkDestinationTests: XCTestCase {
                 });
             })();
             """) as? [Bool]
-        XCTAssertEqual(intercepted, [false, false, false, false, true])
-        await fulfillment(of: [jumped], timeout: 5)
+        XCTAssertEqual(intercepted, [true, true, true, true, true])
+        await fulfillment(of: [jumped, fragments], timeout: 5)
+        XCTAssertEqual(receivedFragments, ["heading", "", "another", "marklens-line=0"])
+    }
+
+    @MainActor
+    func testHeadingContextOpenPreservesTheFragmentThroughAnAccessFailure() async throws {
+        let failed = expectation(description: "The native access flow retains the heading and tab choice")
+        let link = try XCTUnwrap(URL(string: "file:///wiki/notes.md#ABC%20%25"))
+        let coordinator = MarkdownWebView(
+            html: "", documentURL: URL(fileURLWithPath: "/wiki/source.md"),
+            openDocument: { url, line, inNewTab in
+                XCTAssertEqual(url, link)
+                XCTAssertNil(line)
+                XCTAssertTrue(inNewTab)
+                throw CocoaError(.fileReadNoPermission)
+            },
+            requestLocalDocumentAccess: { url, line, inNewTab, _ in
+                XCTAssertEqual(url, link)
+                XCTAssertNil(line)
+                XCTAssertTrue(inNewTab)
+                failed.fulfill()
+            }
+        ).makeCoordinator()
+        let menu = try XCTUnwrap(coordinator.makeLinkContextMenu(for: link))
+        let item = try XCTUnwrap(menu.item(withTitle: "Open in New Tab"))
+        XCTAssertTrue(NSApp.sendAction(try XCTUnwrap(item.action), to: item.target, from: item))
+        await fulfillment(of: [failed], timeout: 3)
     }
 
     @MainActor

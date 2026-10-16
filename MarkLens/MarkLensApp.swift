@@ -47,7 +47,7 @@ struct MarkLensApp: App {
                     .frame(width: 0, height: 0)
                 }
                 .environmentObject(appDelegate.localDocumentAccess)
-                .environmentObject(appDelegate.lineNavigation)
+                .environmentObject(appDelegate.documentNavigation)
                 .environmentObject(appDelegate.documentTabs)
 #else
                 .environmentObject(localDocumentAccess)

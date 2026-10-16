@@ -24,8 +24,15 @@ nonisolated struct DocumentScrollPosition: Equatable, Sendable {
     var previousAnchorIdentity: String? = nil
     var nextAnchorIdentity: String? = nil
     var viewportOffset: Double = 0
+    var fragment: String? = nil
 
     static let top = DocumentScrollPosition(sourceLine: nil, progress: 0)
+
+    static func linkTarget(url: URL, line: Int?) -> Self? {
+        if let line, line > 0 { return Self(sourceLine: line, progress: 0) }
+        guard let fragment = URLComponents(url: url, resolvingAgainstBaseURL: true)?.fragment else { return nil }
+        return Self(sourceLine: nil, progress: 0, fragment: fragment)
+    }
 
 #if DEBUG
     var diagnosticDescription: String {
@@ -160,7 +167,7 @@ struct ContentView: View {
 #if os(macOS)
     @Environment(\.openDocument) private var openDocument
     @Environment(\.openWindow) private var openWindow
-    @EnvironmentObject private var lineNavigation: LineNavigationCoordinator
+    @EnvironmentObject private var documentNavigation: DocumentNavigationCoordinator
     @EnvironmentObject private var documentTabs: DocumentTabCoordinator
     @EnvironmentObject private var releaseNotesCoordinator: ReleaseNotesCoordinator
     @EnvironmentObject private var updateChecker: UpdateChecker
@@ -200,7 +207,7 @@ struct ContentView: View {
     @State private var wikiResolutionGeneration = 0
     @State private var isResolvingWikiLink = false
     @State private var wikiResolutionWork: Task<WikiLinkResolution, Never>?
-    @State private var pendingRootLine: Int?
+    @State private var pendingRootPosition: DocumentScrollPosition?
     @State private var viewModeEnabled = false
     @State private var preferenceFileURL: URL?
     @State private var hasLoadedViewModePreference = false
@@ -565,11 +572,9 @@ struct ContentView: View {
             isHTMLFilteringInfoPresented = false
             resetPreviewNavigationState()
 #if os(macOS)
-            if let pendingRootLine, wikiNavigation.currentPage == nil {
-                self.pendingRootLine = nil
-                restorePreviewScroll(to: DocumentScrollPosition(
-                    sourceLine: pendingRootLine, progress: 0
-                ), highlight: true)
+            if let pendingRootPosition, wikiNavigation.currentPage == nil {
+                self.pendingRootPosition = nil
+                restorePreviewScroll(to: pendingRootPosition, highlight: true)
             }
 #endif
         }
@@ -597,15 +602,15 @@ struct ContentView: View {
                 acceptDocumentHandoff()
             }
         }
-        .onReceive(lineNavigation.$requests) { requests in
+        .onReceive(documentNavigation.$requests) { requests in
             guard let fileURL,
                   let request = requests[fileURL.standardizedFileURL] else { return }
             Task { @MainActor in
-                guard let line = lineNavigation.takeRequest(for: fileURL, id: request.id) else {
+                guard let position = documentNavigation.takeRequest(for: fileURL, id: request.id) else {
                     return
                 }
                 if wikiNavigation.currentPage != nil {
-                    pendingRootLine = line
+                    pendingRootPosition = position
                 }
                 while wikiNavigation.currentPage != nil {
                     guard wikiNavigation.goBack(
@@ -613,12 +618,12 @@ struct ContentView: View {
                     ) != nil else { break }
                 }
                 if wikiNavigation.currentPage != nil {
-                    pendingRootLine = nil
+                    pendingRootPosition = nil
                     localDocumentError = "Unable to return to the linked document."
                     return
                 }
-                if pendingRootLine == nil {
-                    restorePreviewScroll(to: DocumentScrollPosition(sourceLine: line, progress: 0), highlight: true)
+                if pendingRootPosition == nil {
+                    restorePreviewScroll(to: position, highlight: true)
                 }
             }
         }
@@ -691,7 +696,7 @@ struct ContentView: View {
             }
             Button("Cancel", role: .cancel) {
                 if let targetURL = pendingLocalAccessRequest?.targetURL {
-                    lineNavigation.cancel(for: targetURL)
+                    documentNavigation.cancel(for: targetURL)
                 }
                 pendingLocalAccessRequest = nil
             }
@@ -796,6 +801,11 @@ struct ContentView: View {
 #endif
             },
             openCurrentLine: openCurrentLine,
+            openCurrentFragment: { fragment in
+#if os(macOS)
+                restorePreviewScroll(to: DocumentScrollPosition(sourceLine: nil, progress: 0, fragment: fragment), highlight: true)
+#endif
+            },
             requestLocalDocumentAccess: { url, line, inNewTab, errorDescription in
 #if os(macOS)
                 handleLocalDocumentOpenFailure(url, line: line, inNewTab: inNewTab, errorDescription: errorDescription)
@@ -1406,23 +1416,23 @@ struct ContentView: View {
     private var openLocalDocument: (URL, Int?, Bool) async throws -> Void {
 #if os(macOS)
         { url, line, inNewTab in
-            guard isSupportedMarkdownDocument(url) else {
+            guard case .markdown(let fileURL) = LocalLinkDestination(url: url) else {
                 throw CocoaError(.fileReadUnsupportedScheme)
             }
-            if viewModeEnabled && !inNewTab && !localDocumentAccess.hasAccess(to: url) {
+            if viewModeEnabled && !inNewTab && !localDocumentAccess.hasAccess(to: fileURL) {
                 throw CocoaError(.fileReadNoPermission)
             }
             if viewModeEnabled && !inNewTab {
                 navigateInView(to: url, line: line)
                 return
             }
-            if let line {
-                lineNavigation.enqueue(fileURL: url, line: line)
+            if let position = DocumentScrollPosition.linkTarget(url: url, line: line) {
+                documentNavigation.enqueue(fileURL: fileURL, position: position)
             }
             do {
-                try await openLinkedDocument(url, inNewTab: inNewTab)
+                try await openLinkedDocument(fileURL, inNewTab: inNewTab)
             } catch {
-                lineNavigation.cancel(for: url)
+                documentNavigation.cancel(for: fileURL)
                 throw error
             }
         }
@@ -1601,7 +1611,7 @@ struct ContentView: View {
         if case .wikiFolder = request {
             return fileURL?.deletingLastPathComponent().standardizedFileURL
         }
-        guard let targetURL = request.targetURL else { return nil }
+        guard let targetURL = request.targetURL.flatMap({ LocalLinkDestination(url: $0)?.fileURL }) else { return nil }
         let documentFolder = displayedURL?.deletingLastPathComponent().standardizedFileURL
         if let documentFolder, LocalDocumentAccess.contains(targetURL, in: documentFolder) {
             return documentFolder
@@ -1649,7 +1659,7 @@ struct ContentView: View {
         panel.begin { response in
             guard response == .OK, let selectedFolder = panel.url else {
                 if let targetURL = request.targetURL {
-                    lineNavigation.cancel(for: targetURL)
+                    documentNavigation.cancel(for: targetURL)
                 }
                 return
             }
@@ -1660,7 +1670,7 @@ struct ContentView: View {
             guard selectedFolderIsValid else {
                 selectedFolder.stopAccessingSecurityScopedResource()
                 if let targetURL = request.targetURL {
-                    lineNavigation.cancel(for: targetURL)
+                    documentNavigation.cancel(for: targetURL)
                 }
                 localDocumentError = request.isWikiFolder
                     ? "Choose a folder that contains this Markdown document."
@@ -1676,7 +1686,7 @@ struct ContentView: View {
                         do {
                             try await openLocalDocument(targetURL, line, inNewTab)
                         } catch {
-                            lineNavigation.cancel(for: targetURL)
+                            documentNavigation.cancel(for: targetURL)
                             localDocumentError = error.localizedDescription
                         }
                     }
@@ -1689,7 +1699,7 @@ struct ContentView: View {
                 }
             } catch {
                 if let targetURL = request.targetURL {
-                    lineNavigation.cancel(for: targetURL)
+                    documentNavigation.cancel(for: targetURL)
                 }
                 localDocumentError = error.localizedDescription
             }
@@ -1700,12 +1710,12 @@ struct ContentView: View {
         _ url: URL, line: Int?, inNewTab: Bool, errorDescription: String
     ) {
         guard isSupportedMarkdownDocument(url) else {
-            lineNavigation.cancel(for: url)
+            documentNavigation.cancel(for: url)
             localDocumentError = "\(url.lastPathComponent) is not a supported markdown document."
             return
         }
         if localDocumentAccess.hasAccess(to: url) {
-            lineNavigation.cancel(for: url)
+            documentNavigation.cancel(for: url)
             localDocumentError = errorDescription
         } else {
             pendingLocalAccessRequest = .document(url, line, inNewTab)
@@ -1852,13 +1862,13 @@ struct ContentView: View {
             navigateInView(to: url, wikiRoot: wikiRoot, line: line)
         } else {
             if let line {
-                lineNavigation.enqueue(fileURL: url, line: line)
+                documentNavigation.enqueue(fileURL: url, line: line)
             }
             Task {
                 do {
                     try await openLinkedDocument(url, inNewTab: inNewTab)
                 } catch {
-                    lineNavigation.cancel(for: url)
+                    documentNavigation.cancel(for: url)
                     localDocumentError = error.localizedDescription
                 }
             }
@@ -1889,16 +1899,16 @@ struct ContentView: View {
     }
 
     private func navigateInView(to url: URL, wikiRoot: URL, line: Int? = nil) {
+        guard let documentURL = LocalLinkDestination(url: url)?.fileURL else { return }
+        let position = DocumentScrollPosition.linkTarget(url: url, line: line)
         wikiNavigation.navigate(
-            to: url,
+            to: documentURL,
             wikiRoot: wikiRoot,
             renderingPreferences: renderingPreferences,
             leavingScrollPosition: previewScrollPositionStore.position
         ) { navigation in
-            if let line {
-                restorePreviewScroll(
-                    to: DocumentScrollPosition(sourceLine: line, progress: 0), highlight: true
-                )
+            if let position {
+                restorePreviewScroll(to: position, highlight: true)
             } else {
                 restorePreviewScroll(to: navigation.scrollPosition)
             }
@@ -2225,7 +2235,7 @@ private struct PreviewFindBar: View {
 #if os(macOS)
     ContentView(document: MarkdownDocument(text: MarkdownDocument.starterText))
         .environmentObject(LocalDocumentAccess())
-        .environmentObject(LineNavigationCoordinator())
+        .environmentObject(DocumentNavigationCoordinator())
         .environmentObject(DocumentTabCoordinator())
         .environmentObject(UpdateChecker())
         .environmentObject(ReleaseNotesCoordinator())

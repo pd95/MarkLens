@@ -36,6 +36,7 @@ struct MarkdownWebView: PlatformViewRepresentable {
     var openFileInDefaultApp: (URL) -> Void
     var linkHoverChanged: (LinkHover?) -> Void
     var openCurrentLine: (Int) -> Void
+    var openCurrentFragment: (String) -> Void
     var requestLocalDocumentAccess: (URL, Int?, Bool, String) -> Void
     var localImagePermissionDenied: (URL) -> Void
     var reloadRequest: Int
@@ -77,6 +78,7 @@ struct MarkdownWebView: PlatformViewRepresentable {
         openFileInDefaultApp: @escaping (URL) -> Void = { _ in },
         linkHoverChanged: @escaping (LinkHover?) -> Void = { _ in },
         openCurrentLine: @escaping (Int) -> Void = { _ in },
+        openCurrentFragment: @escaping (String) -> Void = { _ in },
         requestLocalDocumentAccess: @escaping (URL, Int?, Bool, String) -> Void = { _, _, _, _ in },
         localImagePermissionDenied: @escaping (URL) -> Void = { _ in },
         reloadRequest: Int = 0,
@@ -114,6 +116,7 @@ struct MarkdownWebView: PlatformViewRepresentable {
         self.openFileInDefaultApp = openFileInDefaultApp
         self.linkHoverChanged = linkHoverChanged
         self.openCurrentLine = openCurrentLine
+        self.openCurrentFragment = openCurrentFragment
         self.requestLocalDocumentAccess = requestLocalDocumentAccess
         self.localImagePermissionDenied = localImagePermissionDenied
         self.reloadRequest = reloadRequest
@@ -596,6 +599,7 @@ struct MarkdownWebView: PlatformViewRepresentable {
                 "request": parent.scrollRequest,
                 "highlight": parent.highlightScrollRequest == parent.scrollRequest,
                 "line": parent.scrollTarget.sourceLine.map { $0 as Any } ?? NSNull(),
+                "fragment": parent.scrollTarget.fragment.map { $0 as Any } ?? NSNull(),
                 "progress": parent.scrollTarget.progress,
                 "anchor": parent.scrollTarget.anchorIdentity.map { $0 as Any } ?? NSNull(),
                 "occurrence": parent.scrollTarget.anchorOccurrence.map { $0 as Any } ?? NSNull(),
@@ -1169,18 +1173,22 @@ struct MarkdownWebView: PlatformViewRepresentable {
             switch destination {
             case .file, .folder:
                 activateNonMarkdownLink(url, commandKey: inNewTab)
-            case .markdown:
-                guard let documentURL = urlWithoutFragment(url) else { return }
-                if documentURL.standardizedFileURL == parent.documentURL?.standardizedFileURL,
-                   let line = sourceLine(in: url) {
-                    parent.openCurrentLine(line)
-                    return
+            case .markdown(let documentURL):
+                if documentURL == parent.documentURL.flatMap({ LocalLinkDestination(url: $0)?.fileURL }) {
+                    if let line = sourceLine(in: url) {
+                        parent.openCurrentLine(line)
+                        return
+                    }
+                    if let fragment = URLComponents(url: url, resolvingAgainstBaseURL: true)?.fragment {
+                        parent.openCurrentFragment(fragment)
+                        return
+                    }
                 }
                 Task { @MainActor in
                     do {
-                        try await parent.openDocument(documentURL, sourceLine(in: url), inNewTab)
+                        try await parent.openDocument(url, sourceLine(in: url), inNewTab)
                     } catch {
-                        parent.requestLocalDocumentAccess(documentURL, sourceLine(in: url), inNewTab, error.localizedDescription)
+                        parent.requestLocalDocumentAccess(url, sourceLine(in: url), inNewTab, error.localizedDescription)
                     }
                 }
             case .wiki(let target):
@@ -1245,27 +1253,8 @@ struct MarkdownWebView: PlatformViewRepresentable {
 #endif
 
 #if os(macOS)
-            if activateNonMarkdownLink(url, commandKey: inNewTab) {
-                decisionHandler(.cancel)
-                return
-            }
-
-            if url.isFileURL,
-               let fragment = url.fragment,
-               fragment.hasPrefix("marklens-line="),
-               let line = Int(fragment.dropFirst("marklens-line=".count)), line > 0,
-               let documentURL = urlWithoutFragment(url) {
-                if documentURL.standardizedFileURL == parent.documentURL?.standardizedFileURL {
-                    parent.openCurrentLine(line)
-                } else {
-                    Task { @MainActor in
-                        do {
-                            try await parent.openDocument(documentURL, line, inNewTab)
-                        } catch {
-                            parent.requestLocalDocumentAccess(documentURL, line, inNewTab, error.localizedDescription)
-                        }
-                    }
-                }
+            if url.isFileURL {
+                activateLocalLink(url, inNewTab: inNewTab)
                 decisionHandler(.cancel)
                 return
             }
@@ -1287,25 +1276,7 @@ struct MarkdownWebView: PlatformViewRepresentable {
                 return
             }
 
-            if url.isFileURL {
-#if os(macOS)
-                guard let documentURL = urlWithoutFragment(url) else {
-                    decisionHandler(.cancel)
-                    return
-                }
-                Task { @MainActor in
-                    do {
-                        try await parent.openDocument(documentURL, nil, inNewTab)
-                    } catch {
-                        parent.requestLocalDocumentAccess(documentURL, nil, inNewTab, error.localizedDescription)
-                    }
-                }
-#else
-                openExternalURL(url)
-#endif
-            } else {
-                openExternalURL(url)
-            }
+            openExternalURL(url)
             decisionHandler(.cancel)
         }
 
@@ -1415,14 +1386,6 @@ struct MarkdownWebView: PlatformViewRepresentable {
                 let url;
                 try { url = new URL(link.href, document.baseURI); } catch { return; }
                 if (url.protocol !== 'file:' || (url.hostname && url.hostname !== 'localhost')) return;
-                const fragmentIndex = url.href.indexOf('#');
-                const isSourceLine = /^#marklens-line=[+]?[0-9]+$/.test(url.hash)
-                    && Number(url.hash.slice('#marklens-line='.length)) > 0;
-                if (fragmentIndex !== -1 && !isSourceLine) {
-                    const current = new URL(document.baseURI);
-                    current.hash = '';
-                    if (url.href.slice(0, fragmentIndex) === current.href) return;
-                }
                 event.preventDefault();
                 window.webkit.messageHandlers.marklensLocalFileClick.postMessage({
                     href: url.href, commandKey: event.metaKey
@@ -1736,6 +1699,19 @@ struct MarkdownWebView: PlatformViewRepresentable {
                 });
                 return best.element;
             };
+            const targetForFragment = fragment => {
+                if (typeof fragment !== 'string' || fragment.length === 0) return null;
+                const exact = document.getElementById(fragment)
+                    || Array.from(document.getElementsByName(fragment)).find(element => element.tagName === 'A');
+                if (exact) return exact;
+                const headings = Array.from(document.querySelectorAll('h1[id], h2[id], h3[id], h4[id], h5[id], h6[id]'));
+                const lower = fragment.toLowerCase();
+                const slug = lower.replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+                return headings.find(element => element.id === lower)
+                    || headings.find(element => element.textContent.trim().toLowerCase() === lower)
+                    || (slug ? headings.find(element => element.id === slug) : null)
+                    || null;
+            };
             const cancelRestoration = () => {
                 activeRestoration = null;
                 restorationScrollY = null;
@@ -1747,8 +1723,16 @@ struct MarkdownWebView: PlatformViewRepresentable {
                 const requestedLine = activeRestoration.line === null
                     ? NaN
                     : Number(activeRestoration.line);
-                const target = targetForAnchor(activeRestoration)
+                const target = targetForFragment(activeRestoration.fragment)
+                    || targetForAnchor(activeRestoration)
                     || (Number.isFinite(requestedLine) ? targetForLine(requestedLine) : null);
+                const isTopFragment = typeof activeRestoration.fragment === 'string'
+                    && activeRestoration.fragment.toLowerCase() === 'top';
+                if (typeof activeRestoration.fragment === 'string'
+                    && activeRestoration.fragment.length > 0 && !target && !isTopFragment) {
+                    report();
+                    return;
+                }
                 if (target) {
                     const requestedOffset = Number(activeRestoration.offset);
                     // Leave a little context above a followed line link. Other
@@ -1765,7 +1749,7 @@ struct MarkdownWebView: PlatformViewRepresentable {
                         0,
                         document.documentElement.scrollHeight - innerHeight
                     );
-                    const requestedProgress = Math.min(
+                    const requestedProgress = isTopFragment ? 0 : Math.min(
                         Math.max(Number.isFinite(requestedLine)
                             ? 1 : Number(activeRestoration.progress) || 0, 0),
                         1
@@ -1832,7 +1816,8 @@ struct MarkdownWebView: PlatformViewRepresentable {
                 },
                 resolve(position) {
                     const requestedLine = position.line === null ? NaN : Number(position.line);
-                    const element = targetForAnchor(position)
+                    const element = targetForFragment(position.fragment)
+                        || targetForAnchor(position)
                         || (Number.isFinite(requestedLine) ? targetForLine(requestedLine) : null);
                     const anchor = element ? anchorByElement.get(element) : null;
                     return anchor ? {

@@ -7,7 +7,7 @@ import Cocoa
 @MainActor
 class AppDelegate: NSObject, NSApplicationDelegate {
     var exitAfterLastWindow: Bool = false
-    let lineNavigation = LineNavigationCoordinator()
+    let documentNavigation = DocumentNavigationCoordinator()
     let documentTabs = DocumentTabCoordinator()
     let localDocumentAccess = LocalDocumentAccess()
     
@@ -27,7 +27,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     func application(_ application: NSApplication, open urls: [URL]) {
         for url in urls {
-            guard let destination = LineNavigationCoordinator.incomingDestination(from: url) else {
+            guard let destination = DocumentNavigationCoordinator.incomingDestination(from: url) else {
                 showOpenError("This MarkLens link is not valid.")
                 continue
             }
@@ -36,12 +36,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func openIncomingDocument(_ fileURL: URL, line: Int) {
-        lineNavigation.enqueue(fileURL: fileURL, line: line)
+        documentNavigation.enqueue(fileURL: fileURL, line: line)
         NSDocumentController.shared.openDocument(withContentsOf: fileURL, display: true) {
             [weak self] _, _, error in
             guard let self, let error else { return }
             if self.localDocumentAccess.hasAccess(to: fileURL) {
-                self.lineNavigation.cancel(for: fileURL)
+                self.documentNavigation.cancel(for: fileURL)
                 self.showOpenError(error.localizedDescription)
             } else {
                 self.requestAccess(to: fileURL, line: line)
@@ -62,12 +62,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         panel.begin { [weak self] response in
             guard let self else { return }
             guard response == .OK, let selected = panel.url else {
-                self.lineNavigation.cancel(for: fileURL)
+                self.documentNavigation.cancel(for: fileURL)
                 return
             }
             guard LocalDocumentAccess.sameFolder(selected, folder) else {
                 selected.stopAccessingSecurityScopedResource()
-                self.lineNavigation.cancel(for: fileURL)
+                self.documentNavigation.cancel(for: fileURL)
                 self.showOpenError("Choose the \(folder.lastPathComponent) folder.")
                 return
             }
@@ -75,7 +75,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 try self.localDocumentAccess.authorize(folder: selected)
                 self.openIncomingDocument(fileURL, line: line)
             } catch {
-                self.lineNavigation.cancel(for: fileURL)
+                self.documentNavigation.cancel(for: fileURL)
                 self.showOpenError(error.localizedDescription)
             }
         }

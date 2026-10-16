@@ -7,6 +7,7 @@
 - Peek at linked files with the Quick Look context action, including Markdown documents and wiki pages, without leaving the current reading position. Press Escape to dismiss the preview.
 - Show each link’s destination and click action in a rounded hover annotation, with local paths relative to the current document’s folder and immediate updates when pressing or releasing Command.
 - Fixed local Markdown links such as `../../README.md` being blocked by WebKit before reaching MarkLens’s native navigation and file-access handling.
+- Fixed heading links such as `#ABC` and `other.md#ABC` opening without jumping to the destination. Heading fragments now survive document opening, tab navigation, and file-access retries.
 
 ## 1.9.1
 

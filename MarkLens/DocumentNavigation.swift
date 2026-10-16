@@ -4,31 +4,42 @@ import Foundation
 import Combine
 import MarkdownPipeline
 
-struct LineNavigationRequest: Equatable {
+struct DocumentNavigationRequest: Equatable {
     let id = UUID()
     let fileURL: URL
-    let line: Int
+    let position: DocumentScrollPosition
 }
 
 @MainActor
-final class LineNavigationCoordinator: ObservableObject {
-    @Published private(set) var requests: [URL: LineNavigationRequest] = [:]
+final class DocumentNavigationCoordinator: ObservableObject {
+    @Published private(set) var requests: [URL: DocumentNavigationRequest] = [:]
 
     func enqueue(fileURL: URL, line: Int) {
         guard line > 0 else { return }
-        let fileURL = fileURL.standardizedFileURL
-        requests[fileURL] = LineNavigationRequest(fileURL: fileURL, line: line)
+        enqueue(fileURL: fileURL, position: DocumentScrollPosition(sourceLine: line, progress: 0))
     }
 
-    func takeRequest(for fileURL: URL, id: UUID) -> Int? {
-        let fileURL = fileURL.standardizedFileURL
+    func enqueue(fileURL: URL, position: DocumentScrollPosition) {
+        let fileURL = Self.documentURL(fileURL)
+        requests[fileURL] = DocumentNavigationRequest(fileURL: fileURL, position: position)
+    }
+
+    func takeRequest(for fileURL: URL, id: UUID) -> DocumentScrollPosition? {
+        let fileURL = Self.documentURL(fileURL)
         guard let request = requests[fileURL], request.id == id else { return nil }
         requests.removeValue(forKey: fileURL)
-        return request.line
+        return request.position
     }
 
     func cancel(for fileURL: URL) {
-        requests.removeValue(forKey: fileURL.standardizedFileURL)
+        requests.removeValue(forKey: Self.documentURL(fileURL))
+    }
+
+    private static func documentURL(_ url: URL) -> URL {
+        var components = URLComponents(url: url, resolvingAgainstBaseURL: true)
+        components?.fragment = nil
+        components?.query = nil
+        return components?.url?.standardizedFileURL ?? url.standardizedFileURL
     }
 
     static func incomingDestination(from url: URL) -> (fileURL: URL, line: Int)? {

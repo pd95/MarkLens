@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
+  <channel>
+    <title>MarkLens Updates</title>
+    <link>https://github.com/pd95/MarkLens/releases</link>
+    <description>Signed MarkLens updates will appear here after the first release.</description>
+  </channel>
+</rss>

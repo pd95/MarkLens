@@ -99,48 +99,55 @@ See `THIRD_PARTY_NOTICES`.
 
 ## Publishing macOS updates
 
-Release archives are built, Developer ID signed, and notarized by the existing
-Xcode Cloud workflow. Starting with 1.10.0, its post-build script requests a
-GitHub Actions job that waits for Cloud to finish, downloads its stapled notarized
-artifact, signs the update ZIP with Sparkle, and publishes a cumulative appcast
-on the `gh-pages` branch. Only
-macOS builds embed Sparkle; Quick Look and mobile builds do not run an updater.
+Release archives are built and Developer ID signed by Xcode Cloud. Starting with
+1.10.0, `ci_post_xcodebuild.sh` notarizes the exported app, waits for Apple's
+acceptance, staples the ticket, signs the update ZIP with Sparkle, and publishes
+the release and cumulative appcast to GitHub. GitHub hosts the release assets and
+serves the feed from `gh-pages`; no GitHub Actions publishing job is required.
+Only macOS builds embed Sparkle; Quick Look and mobile builds do not run an updater.
 
 ### One-time setup before the first release candidate
 
 1. Resolve the pinned Sparkle 2.10.0 package in Xcode. Its tools are in
-   `SourcePackages/artifacts/sparkle/Sparkle/bin/` beneath DerivedData. Use that
-   version's tools for both local setup and Xcode Cloud.
+   `SourcePackages/artifacts/sparkle/Sparkle/bin/` beneath DerivedData. The Cloud
+   publisher finds the resolved tools automatically. If discovery fails, set
+   `SPARKLE_BIN_DIR` to that package's `bin` directory in the Cloud workflow.
 2. Run `generate_keys` on the maintainer's Mac. Keep the generated private key in
    Keychain, export it with `generate_keys -x <private-key-file>`, and retain an
    encrypted backup. Never commit that file or paste its contents into build logs.
-3. In Xcode Cloud, set `SPARKLE_PUBLIC_ED_KEY` to the printed public key.
-   The pre-build script embeds it into the app. Normal local builds leave this
-   setting empty and cannot self-update. In **GitHub repository Settings → Secrets
-   and variables → Actions**, store the exported private key contents as
-   `SPARKLE_PRIVATE_KEY`. Cloud no longer needs the private key.
-4. Store `GITHUB_RELEASE_TOKEN` in both Xcode Cloud and GitHub Actions secrets.
-   Use a maintainer token with repository Contents read/write permission to
-   dispatch the workflow, create Releases, and update `gh-pages`. Do not use the
-   Actions `GITHUB_TOKEN` for Pages pushes: it does not trigger branch-based
-   Pages deployment.
-5. Keep the Xcode Cloud **Notarize – macOS** post-action enabled. Create an App
-   Store Connect **team API key** with access to this app's Xcode Cloud build
-   artifacts (App Store Connect → Users and Access → Integrations → App Store
-   Connect API). Download its `.p8` file and keep a secure backup; Apple permits
-   downloading it only once. Add these **GitHub Actions secrets**:
+3. Configure the following environment variables in the **Xcode Cloud Release
+   workflow → Environment** (mark secret values as secrets):
 
-   - `APP_STORE_CONNECT_API_PRIVATE_KEY`: complete `.p8` contents.
-   - `APP_STORE_CONNECT_API_KEY_ID`: the key ID shown by Apple.
-   - `APP_STORE_CONNECT_API_ISSUER_ID`: the issuer ID shown by Apple.
+   | Variable | Value | Secret |
+   | --- | --- | --- |
+   | `SPARKLE_PUBLIC_ED_KEY` | Public key from `generate_keys` | No |
+   | `SPARKLE_PRIVATE_KEY` | Exported Sparkle private key contents | Yes |
+   | `GITHUB_RELEASE_TOKEN` | Maintainer token with repository Contents read/write permission | Yes |
+   | `APP_STORE_CONNECT_API_PRIVATE_KEY` | Complete Apple team API `.p8` file contents | Yes |
+   | `APP_STORE_CONNECT_API_KEY_ID` | Apple API key ID | Yes |
+   | `APP_STORE_CONNECT_API_ISSUER_ID` | Apple API issuer ID | Yes |
 
-   See [Apple’s API overview](https://developer.apple.com/app-store-connect/api/)
-   for Xcode Cloud API access. This key retrieves the completed artifact; it never submits another
-   notarization. The publisher requires a successful Cloud run and its
-   `STAPLED_NOTARIZED_ARCHIVE`, then verifies the app identity, build, signed source-commit metadata, signature,
-   stapled ticket, and Gatekeeper acceptance. Temporary private-key files have
-   owner-only permissions and are removed after signing API tokens. Sparkle
-   tools are downloaded from the pinned, checksum-verified vendor release.
+   The public key is embedded in the app by the pre-build script. Normal local
+   builds leave it empty and cannot self-update. Use a maintainer GitHub token
+   that can create Releases and update `gh-pages`; an Actions `GITHUB_TOKEN` does
+   not trigger branch-based Pages deployment.
+4. Obtain the Apple key in **App Store Connect → Users and Access → Integrations
+   → App Store Connect API → Team Keys**. Generate a team key with **Developer**
+   access, download its `.p8` file, and copy the Key ID and Issuer ID from that
+   page. Apple permits downloading the private key only once; keep a secure
+   backup. See [Apple's key setup instructions](https://developer.apple.com/documentation/appstoreconnectapi/creating-api-keys-for-app-store-connect-api).
+   If you already created this key for artifact retrieval, reuse the same values
+   in the Cloud variables above. No Apple or Sparkle credentials are needed in
+   GitHub Actions for this pipeline; remove those repository secrets if they
+   were added solely for the previous publishing workflow.
+5. **Disable the built-in Notarize – macOS post-action** in the Cloud Release
+   workflow. Keep the Archive action configured to export a **Developer ID**
+   signed macOS app. The script replaces the post-action: it submits once using
+   `notarytool --wait`, checks for `Accepted`, staples the ticket, and verifies
+   Gatekeeper acceptance before packaging the final Sparkle update ZIP.
+   An already-stapled export skips submission. A rejection, timeout, or validation
+   failure stops publication. Private-key files have owner-only permissions and
+   are deleted on success or failure. See [Apple's notarization workflow](https://developer.apple.com/documentation/security/customizing-the-notarization-workflow).
 6. Before the first release, create the dedicated feed branch from your Mac:
 
    ```sh
@@ -150,16 +157,15 @@ macOS builds embed Sparkle; Quick Look and mobile builds do not run an updater.
    This pushes only `.nojekyll` and an empty `updates/appcast.xml`, using your
    existing GitHub authentication. It does not switch branches or change your
    working files/index. Add `--dry-run` to inspect the bootstrap commit without
-   pushing. If you skip this step, the first successful release publication also
-   creates the branch automatically.
+   pushing. If you skip this step, the first successful publication also creates
+   the branch automatically. No need to repeat this if the branch already exists.
 7. In GitHub repository Settings → Pages, choose **Deploy from a branch**,
    `gh-pages`, and `/(root)`. Verify that the deployment serves
    `https://pd95.github.io/MarkLens/updates/appcast.xml`. The initial feed contains
-   no releases; the GitHub publisher fills it after the first successful signed
-   release. Commit and push this implementation, including
-   `.github/workflows/publish-updates.yml`, to the default branch **before**
-   creating the release tag. Repository dispatch only starts workflows already
-   present on the default branch.
+   no releases; the Cloud publisher fills it after the first successful release.
+   Commit and push this implementation before creating the release tag so Cloud
+   uses the new scripts. The existing release-script verification workflow in
+   GitHub Actions only runs tests; it does not receive release credentials.
 
 ### Release rules and recovery
 
@@ -183,12 +189,15 @@ macOS builds embed Sparkle; Quick Look and mobile builds do not run an updater.
   supported; rebuilding the same tag with different bytes requires a new tag.
   No publication step deletes advertised preview releases or other feed history.
 - If feed publication fails after upload, the previous feed remains usable.
-  Retry **Publish Notarized Update** from GitHub Actions using its manual inputs:
-  the original Cloud build ID/number, release tag, and full commit SHA. This
-  retrieves the original artifact rather than rebuilding. Concurrent branch updates are retried
-  against the latest feed without force-pushing. Check the GitHub publication workflow and
-  GitHub Pages deployment result; the Xcode Cloud success message alone does not
-  prove the Pages deployment succeeded.
+  Retry publication only with the same original stapled app and exact ZIP bytes;
+  run `ci_scripts/release_updates.py` on macOS with the release environment
+  (including `CI_COMMIT` matching the app's signed source metadata). Rebuilding
+  in Cloud changes the build number and requires a new release tag. Do not retry
+  a published tag by overwriting its archive. Concurrent feed updates are retried
+  against the latest feed without force-pushing. Check the Cloud post-build log
+  and GitHub Pages deployment result; Cloud success alone does not prove that
+  Pages finished deploying. If Apple's submission times out (20 minutes), it
+  may still be processing; check its status before starting another submission.
 - To withdraw a bad update, remove its item from the feed and redeploy Pages;
   retain its archive for cached offers. Publish a corrected release with a higher
   build number. Do not lower versions or overwrite an advertised ZIP.

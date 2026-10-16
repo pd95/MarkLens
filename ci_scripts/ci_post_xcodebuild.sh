@@ -2,4 +2,4 @@
 set -euo pipefail
 
 SCRIPT_DIR="${0:A:h}"
-exec python3 "$SCRIPT_DIR/request_update_publication.py"
+exec python3 "$SCRIPT_DIR/release_updates.py"

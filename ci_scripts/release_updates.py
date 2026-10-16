@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Publish immutable ZIPs and a Sparkle appcast from the finished Cloud artifact.
+"""Publish immutable ZIPs and a Sparkle appcast in Xcode Cloud after scripted notarization.
 
 No third-party Python dependencies. Authentication and signing keys never appear
 in command arguments or git remote URLs. Git's ref update provides the compare-
@@ -289,6 +289,47 @@ def generate_feed(directory, tools, secret, snapshot, archive, build, tag, url, 
     return feed.read_bytes()
 
 
+def notarize_app(app, environment):
+    """Replace the Cloud Notarize post-action with one synchronous submission."""
+    try:
+        run(["xcrun", "stapler", "validate", app])
+        return
+    except ReleaseError:
+        pass
+    private_key = environment.get("APP_STORE_CONNECT_API_PRIVATE_KEY")
+    key_id = environment.get("APP_STORE_CONNECT_API_KEY_ID")
+    issuer_id = environment.get("APP_STORE_CONNECT_API_ISSUER_ID")
+    if not all((private_key, key_id, issuer_id)):
+        raise ReleaseError(
+            "Configure these Xcode Cloud variables for scripted notarization: "
+            "APP_STORE_CONNECT_API_PRIVATE_KEY (secret), APP_STORE_CONNECT_API_KEY_ID and APP_STORE_CONNECT_API_ISSUER_ID "
+            "to notarize before publishing."
+        )
+    with tempfile.TemporaryDirectory(prefix="marklens-notarization-") as temporary:
+        directory = Path(temporary)
+        key_file = directory / "AuthKey.p8"
+        descriptor = os.open(key_file, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(descriptor, "w") as file:
+            file.write(private_key.strip() + "\n")
+        print("Submitting the signed app for notarization; waiting up to 20 minutes for Apple.", flush=True)
+        submission = directory / "MarkLens-notarization.zip"
+        run(["ditto", "-c", "-k", "--keepParent", app, submission])
+        result = run([
+            "xcrun", "notarytool", "submit", submission, "--key", key_file,
+            "--key-id", key_id, "--issuer", issuer_id, "--wait", "--timeout", "20m",
+            "--output-format", "json",
+        ])
+        try:
+            accepted = json.loads(result).get("status") == "Accepted"
+        except (ValueError, AttributeError):
+            accepted = False
+        if not accepted:
+            raise ReleaseError("Apple did not accept the notarization submission; no update was published")
+        run(["xcrun", "stapler", "staple", app])
+        run(["xcrun", "stapler", "validate", app])
+        print("Notarization accepted and ticket stapled; preparing the Sparkle update.", flush=True)
+
+
 def publish(environment=os.environ):
     tag = environment.get("CI_TAG", "").removeprefix("refs/tags/")
     if (environment.get("CI_XCODEBUILD_ACTION") != "archive"
@@ -304,7 +345,7 @@ def publish(environment=os.environ):
     token = environment.get("GITHUB_RELEASE_TOKEN")
     secret = environment.get("SPARKLE_PRIVATE_KEY")
     if not token or not secret:
-        raise ReleaseError("GITHUB_RELEASE_TOKEN and SPARKLE_PRIVATE_KEY must be configured as GitHub Actions secrets")
+        raise ReleaseError("GITHUB_RELEASE_TOKEN and SPARKLE_PRIVATE_KEY must be configured as Xcode Cloud secrets")
     tools = find_sparkle_tools(environment)
     artifact = Path(environment.get("CI_DEVELOPER_ID_SIGNED_APP_PATH", "/nonexistent"))
     app = artifact if artifact.suffix == ".app" else artifact / "MarkLens.app"
@@ -312,6 +353,11 @@ def publish(environment=os.environ):
         info = plistlib.loads((app / "Contents/Info.plist").read_bytes())
     except (OSError, plistlib.InvalidFileException) as error:
         raise ReleaseError("Cannot read the exported MarkLens.app") from error
+    commit = environment.get("CI_COMMIT", "")
+    if (info.get("CFBundleIdentifier") != "ch.doapp.MarkLens"
+            or not re.fullmatch(r"[0-9a-fA-F]{40}", commit)
+            or info.get("MarkLensReleaseCommit") != commit):
+        raise ReleaseError("Exported app identity or signed source commit does not match this release")
     build = str(info.get("CFBundleVersion", ""))
     if not build.isdecimal() or int(build) < 1 or info.get("CFBundleShortVersionString") != base:
         raise ReleaseError("App version does not match the release tag or has an invalid build number")
@@ -327,7 +373,7 @@ def publish(environment=os.environ):
     if not extension.is_dir() or not (app / "Contents/Frameworks/Sparkle.framework").is_dir():
         raise ReleaseError("Exported app is missing Quick Look or Sparkle")
     run(["codesign", "--verify", "--deep", "--strict", app])
-    run(["xcrun", "stapler", "validate", app])
+    notarize_app(app, environment)
     run(["spctl", "--assess", "--type", "execute", app])
     repository = environment.get("GITHUB_REPOSITORY", "pd95/MarkLens")
     github = GitHub(repository, token, environment.get("GITHUB_API_URL", "https://api.github.com"),

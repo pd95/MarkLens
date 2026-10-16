@@ -135,19 +135,19 @@ class ReleaseUpdatesTests(unittest.TestCase):
             item = ET.fromstring(result).find("./channel/item")
             self.assertEqual(item.findtext(f"{{{release.SPARKLE}}}shortVersionString"), "1.10.0-rc2")
 
-    def run_publication(self, *, fail_upload=False, race=False, fail_notarization=False):
+    def run_publication(self, *, fail_upload=False, race=False, fail_notarization=False, bad_commit=False, bad_identity=False):
         with tempfile.TemporaryDirectory() as tmp:
             directory = Path(tmp)
             app = directory / "MarkLens.app"
             (app / "Contents/PlugIns/QuickLookPreview_macOS.appex").mkdir(parents=True)
             (app / "Contents/Frameworks/Sparkle.framework").mkdir(parents=True)
-            info = {"CFBundleVersion": "102", "CFBundleShortVersionString": "1.10.0",
+            info = {"CFBundleIdentifier": "wrong.app" if bad_identity else "ch.doapp.MarkLens", "MarkLensReleaseCommit": "b" * 40 if bad_commit else "a" * 40, "CFBundleVersion": "102", "CFBundleShortVersionString": "1.10.0",
                     "SUPublicEDKey": base64.b64encode(bytes(32)).decode(), "SUFeedURL": release.FEED_URL}
             (app / "Contents/Info.plist").write_bytes(plistlib.dumps(info))
             changelog = directory / "CHANGELOG.md"
             changelog.write_text("## 1.10.0\nNew\n## 1.9.1\nOld\n")
             environment = {"CI_XCODEBUILD_ACTION": "archive", "CI_XCODEBUILD_EXIT_CODE": "0", "CI_TAG": TAG,
-                           "GITHUB_RELEASE_TOKEN": "token", "SPARKLE_PRIVATE_KEY": "secret",
+                           "GITHUB_RELEASE_TOKEN": "token", "SPARKLE_PRIVATE_KEY": "secret", "CI_COMMIT": "a" * 40,
                            "CI_DEVELOPER_ID_SIGNED_APP_PATH": str(app), "CHANGELOG_FILE": str(changelog)}
             def fake_run(args, *, secret=None):
                 if args[:3] == ["xcrun", "stapler", "validate"] and fail_notarization:
@@ -166,11 +166,11 @@ class ReleaseUpdatesTests(unittest.TestCase):
                     github.upload_archive.side_effect = release.ReleaseError("Upload failed")
                 if race:
                     github.publish_files.side_effect = [release.APIError(422, "update ref"), None]
-                if fail_upload or fail_notarization:
+                if fail_upload or fail_notarization or bad_commit or bad_identity:
                     with self.assertRaises(release.ReleaseError):
                         release.publish(environment)
                     github.publish_files.assert_not_called()
-                    if fail_notarization:
+                    if fail_notarization or bad_commit or bad_identity:
                         github.release.assert_not_called()
                 else:
                     release.publish(environment)
@@ -182,6 +182,12 @@ class ReleaseUpdatesTests(unittest.TestCase):
                     self.assertIn(".nojekyll", files)
                     self.assertIn(release.FEED_PATH, files)
                     self.assertIn(f"updates/MarkLens-{TAG}.md", files)
+
+    def test_bundle_identity_mismatch_prevents_publication(self):
+        self.run_publication(bad_identity=True)
+
+    def test_embedded_release_commit_mismatch_prevents_publication(self):
+        self.run_publication(bad_commit=True)
 
     def test_failed_upload_leaves_feed_unchanged(self):
         self.run_publication(fail_upload=True)

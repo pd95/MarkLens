@@ -41,7 +41,8 @@ final class LinkHoverTests: XCTestCase {
                     let preference = LinkedFileOpenPreference(clickAction: clickAction, commandClickAction: commandAction)
                     for commandKey in [false, true] {
                         let hover = LinkHover(url: url, commandKey: commandKey)
-                        let action = commandKey ? commandAction : clickAction
+                        let action: LinkedFileAction = url.hasDirectoryPath ? .revealInFinder
+                            : (commandKey ? commandAction : clickAction)
                         let prefix = action.title + ": "
                         XCTAssertEqual(hover.annotation(documentURL: nil, navigatesInPlace: true, fileOpenPreference: preference), prefix + url.path)
                         XCTAssertEqual(hover.annotation(documentURL: document, navigatesInPlace: true, fileOpenPreference: preference), prefix + relativePath)

@@ -2,7 +2,8 @@
 
 ## 1.10.0 (Unreleased)
 
-- Choose Quick Look, Reveal in Finder, or Open in Default App for local files and folders handled outside MarkLens, with separate normal-click and Command-click actions in Navigation settings and explicit context-menu actions.
+- Choose Quick Look, Reveal in Finder, or Open in Default App for local files handled outside MarkLens, with separate normal-click and Command-click actions in Navigation settings and explicit context-menu actions.
+- Folder links always reveal in Finder, including Command-click, and only offer Reveal in Finder and Copy Link Address in their context menu.
 - Peek at linked files with the Quick Look context action, including Markdown documents and wiki pages, without leaving the current reading position. Press Escape to dismiss the preview.
 - Show each link’s destination and click action in a rounded hover annotation, with local paths relative to the current document’s folder and immediate updates when pressing or releasing Command.
 - Fixed local Markdown links such as `../../README.md` being blocked by WebKit before reaching MarkLens’s native navigation and file-access handling.

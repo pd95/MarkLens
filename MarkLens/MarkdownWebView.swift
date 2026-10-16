@@ -1106,10 +1106,13 @@ struct MarkdownWebView: PlatformViewRepresentable {
             case .markdown, .wiki:
                 add("Open", action: #selector(openContextLink(_:)))
                 add("Open in New Tab", action: #selector(openContextLinkInTab(_:)))
+                add("Quick Look", action: #selector(previewContextLink(_:)))
             case .file:
                 add("Open in Default App", action: #selector(openContextLinkInDefaultApp(_:)))
+                add("Quick Look", action: #selector(previewContextLink(_:)))
+            case .folder:
+                break
             }
-            add("Quick Look", action: #selector(previewContextLink(_:)))
             add("Reveal in Finder", action: #selector(revealContextLink(_:)))
             menu.addItem(.separator())
             add("Copy Link Address", action: #selector(copyContextLink(_:)))
@@ -1145,9 +1148,12 @@ struct MarkdownWebView: PlatformViewRepresentable {
         @objc private func previewContextLink(_ sender: Any?) {
             guard let url = (sender as? NSMenuItem)?.representedObject as? URL,
                   let destination = LocalLinkDestination(url: url) else { return }
-            if let fileURL = destination.fileURL {
+            switch destination {
+            case .markdown(let fileURL), .file(let fileURL):
                 parent.previewFile(fileURL)
-            } else if case .wiki(let target) = destination {
+            case .folder(let fileURL):
+                revealFile(fileURL)
+            case .wiki(let target):
                 parent.previewWikiLink(target)
             }
         }
@@ -1161,7 +1167,7 @@ struct MarkdownWebView: PlatformViewRepresentable {
         private func activateLocalLink(_ url: URL, inNewTab: Bool) {
             guard let destination = LocalLinkDestination(url: url) else { return }
             switch destination {
-            case .file:
+            case .file, .folder:
                 activateNonMarkdownLink(url, commandKey: inNewTab)
             case .markdown:
                 guard let documentURL = urlWithoutFragment(url) else { return }
@@ -1185,6 +1191,9 @@ struct MarkdownWebView: PlatformViewRepresentable {
         @discardableResult
         func activateNonMarkdownLink(_ url: URL, commandKey: Bool = false) -> Bool {
             switch LocalLinkDestination(url: url) {
+            case .folder(let folderURL):
+                revealFile(folderURL)
+                return true
             case .file(let fileURL):
                 switch parent.fileOpenPreference.action(commandKey: commandKey) {
                 case .revealInFinder: revealFile(fileURL)

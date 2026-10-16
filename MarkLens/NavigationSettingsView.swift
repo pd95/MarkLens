@@ -45,7 +45,7 @@ struct NavigationSettingsView: View {
                     }
                 }
                 .accessibilityIdentifier("linkedFileCommandClickPreferencePicker")
-                Text("Applies to images, text, JSON, other local files, and folders. Open in Default App uses the application assigned to the file in macOS.")
+                Text("Applies to images, text, JSON, and other local files. Folder links always reveal in Finder. Open in Default App uses the application assigned to the file in macOS.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }

@@ -35,8 +35,8 @@ final class LinkedFileUITests: XCTestCase {
             XCTAssertTrue(app.menuItems["Reveal in Finder"].firstMatch.waitForExistence(timeout: 3), label)
             XCTAssertTrue(app.menuItems["Copy Link Address"].firstMatch.exists)
             XCTAssertEqual(app.menuItems["Open in New Tab"].firstMatch.exists, ["Markdown", "Notes"].contains(label))
-            XCTAssertTrue(app.menuItems["Quick Look"].firstMatch.exists)
-            XCTAssertEqual(app.menuItems["Open in Default App"].firstMatch.exists, ["Image", "PDF", "Folder"].contains(label))
+            XCTAssertEqual(app.menuItems["Quick Look"].firstMatch.exists, label != "Folder")
+            XCTAssertEqual(app.menuItems["Open in Default App"].firstMatch.exists, ["Image", "PDF"].contains(label))
             if label == "Image" { capture(app, name: "linked-image-context-menu") }
             app.typeKey(.escape, modifierFlags: [])
         }
@@ -163,6 +163,64 @@ final class LinkedFileUITests: XCTestCase {
     @MainActor
     func testFinderClickAndQuickLookCommandClick() throws {
         try verifyConfiguredFileActions(clickAction: "revealInFinder", commandAction: "quickLook")
+    }
+
+    @MainActor
+    func testFolderLinksAlwaysRevealRegardlessOfConfiguredActions() throws {
+        let directory = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let sourceDirectory = directory.appendingPathComponent("preview", isDirectory: true)
+        let folder = directory.appendingPathComponent("Linked Folder \(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: sourceDirectory, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let source = sourceDirectory.appendingPathComponent("source.md")
+        let relativePath = "../" + folder.lastPathComponent
+        let encodedPath = try XCTUnwrap(relativePath.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed))
+        try "# Folders\n\n[Folder](\(encodedPath)/)\n\n[Without slash](\(encodedPath))"
+            .write(to: source, atomically: true, encoding: .utf8)
+        let app = open(source, clickAction: "quickLook", commandAction: "openInDefaultApp")
+        defer { app.terminate() }
+        let window = app.windows["source.md"].firstMatch
+        XCTAssertTrue(window.waitForExistence(timeout: 5))
+        let finder = XCUIApplication(bundleIdentifier: "com.apple.finder")
+        let finderWindow = finder.windows[folder.lastPathComponent].firstMatch
+        defer {
+            if finderWindow.exists {
+                finder.activate()
+                finderWindow.click()
+                finder.typeKey("w", modifierFlags: .command)
+            }
+        }
+        for label in ["Folder", "Without slash"] {
+            for commandKey in [false, true] {
+                app.activate()
+                window.click()
+                let link = window.webViews.links[label].firstMatch
+                XCTAssertTrue(link.waitForExistence(timeout: 5))
+                link.hover()
+                let status = window.staticTexts["linkDestinationStatus"].firstMatch
+                verifyAnnotation(status, equals: "Reveal in Finder: \(relativePath)")
+                if commandKey {
+                    XCUIElement.perform(withKeyModifiers: .command) {
+                        verifyAnnotation(status, equals: "Reveal in Finder: \(relativePath)")
+                        link.click()
+                    }
+                } else {
+                    link.rightClick()
+                    XCTAssertTrue(app.menuItems["Reveal in Finder"].firstMatch.waitForExistence(timeout: 3))
+                    XCTAssertFalse(app.menuItems["Quick Look"].firstMatch.exists)
+                    XCTAssertFalse(app.menuItems["Open in Default App"].firstMatch.exists)
+                    app.typeKey(.escape, modifierFlags: [])
+                    link.click()
+                }
+                XCTAssertTrue(finderWindow.waitForExistence(timeout: 5), "\(label), Command=\(commandKey)\n\(finder.windows.debugDescription)")
+                XCTAssertFalse(window.sheets.firstMatch.exists)
+                XCTAssertFalse(app.windows["Quick Look"].firstMatch.exists)
+                finderWindow.click()
+                finder.typeKey("w", modifierFlags: .command)
+                XCTAssertTrue(finderWindow.waitForNonExistence(timeout: 5))
+            }
+        }
     }
 
     @MainActor

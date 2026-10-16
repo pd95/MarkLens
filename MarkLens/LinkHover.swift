@@ -33,6 +33,8 @@ nonisolated struct LinkHover: Equatable, Sendable {
         case .file(let fileURL):
             let action = fileOpenPreference.action(commandKey: commandKey)
             return action.title + ": " + displayPath(for: fileURL, relativeTo: documentURL)
+        case .folder(let folderURL):
+            return "Reveal in Finder: " + displayPath(for: folderURL, relativeTo: documentURL)
         case nil:
             switch url.scheme?.lowercased() {
             case "http", "https": return "Open in browser: " + url.absoluteString

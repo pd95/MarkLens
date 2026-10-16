@@ -24,12 +24,31 @@ final class LocalLinkDestinationTests: XCTestCase {
             let url = URL(fileURLWithPath: "/wiki/file.\(ext)")
             XCTAssertEqual(LocalLinkDestination(url: url), .file(url))
         }
-        for path in ["/wiki/report.pdf", "/wiki/folder/", "/wiki/image.svg", "/wiki/folder.png/"] {
+        for path in ["/wiki/report.pdf", "/wiki/image.svg"] {
             let url = URL(fileURLWithPath: path)
             XCTAssertEqual(LocalLinkDestination(url: url), .file(url.standardizedFileURL))
         }
+        for path in ["/wiki/folder/", "/wiki/folder.png/", "/wiki/folder.md/"] {
+            let url = URL(fileURLWithPath: path)
+            XCTAssertEqual(LocalLinkDestination(url: url), .folder(url.standardizedFileURL))
+        }
         let lineURL = try XCTUnwrap(URL(string: "file:///wiki/notes.md#marklens-line=12"))
         XCTAssertEqual(LocalLinkDestination(url: lineURL), .markdown(URL(fileURLWithPath: "/wiki/notes.md")))
+    }
+
+    func testRecognizesFoldersWithoutTrailingSlashesAndPreservesDirectorySymlinks() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let folder = directory.appendingPathComponent("folder.md", isDirectory: false)
+        let symlink = directory.appendingPathComponent("folder-link.png", isDirectory: false)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(at: symlink, withDestinationURL: folder)
+        for url in [folder, symlink] {
+            XCTAssertFalse(url.hasDirectoryPath)
+            XCTAssertEqual(LocalLinkDestination(url: url), .folder(url))
+            XCTAssertEqual(LocalLinkDestination(url: url)?.fileURL, url)
+        }
     }
 
     func testRejectsRemoteAndMalformedWikiDestinations() throws {
@@ -61,7 +80,7 @@ final class LocalLinkDestinationTests: XCTestCase {
             ("notes.md", ["Open", "Open in New Tab", "Quick Look", "Reveal in Finder", "Copy Link Address"]),
             ("photo.png", ["Open in Default App", "Quick Look", "Reveal in Finder", "Copy Link Address"]),
             ("report.pdf", ["Open in Default App", "Quick Look", "Reveal in Finder", "Copy Link Address"]),
-            ("folder/", ["Open in Default App", "Quick Look", "Reveal in Finder", "Copy Link Address"])
+            ("folder/", ["Reveal in Finder", "Copy Link Address"])
         ] {
             let menu = try XCTUnwrap(coordinator.makeLinkContextMenu(for: URL(fileURLWithPath: "/wiki/" + path)))
             XCTAssertEqual(menu.items.filter { !$0.isSeparatorItem }.map(\.title), titles)
@@ -109,7 +128,18 @@ final class LocalLinkDestinationTests: XCTestCase {
     }
 
     @MainActor
-    func testNonMarkdownClicksUseTheirConfiguredActions() {
+    func testNonMarkdownClicksUseTheirConfiguredActions() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let folder = directory.appendingPathComponent("folder.md", isDirectory: false)
+        let symlink = directory.appendingPathComponent("folder-link.png", isDirectory: false)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(at: symlink, withDestinationURL: folder)
+        let folders = [URL(fileURLWithPath: "/wiki/files/"), folder, symlink]
+        let files = ["/wiki/settings.json", "/wiki/photo.png", "/wiki/report.pdf", "/wiki/notes.txt"].map {
+            URL(fileURLWithPath: $0)
+        }
         for clickAction in LinkedFileAction.allCases {
             for commandAction in LinkedFileAction.allCases {
                 var received: [(LinkedFileAction, URL)] = []
@@ -119,14 +149,15 @@ final class LocalLinkDestinationTests: XCTestCase {
                     openFileInDefaultApp: { received.append((.openInDefaultApp, $0)) }
                 ).makeCoordinator()
                 coordinator.revealFile = { received.append((.revealInFinder, $0)) }
-                for path in ["/wiki/settings.json", "/wiki/files/", "/wiki/photo.png", "/wiki/report.pdf", "/wiki/notes.txt"] {
-                    let url = URL(fileURLWithPath: path)
+                for url in files + folders {
                     for commandKey in [false, true] {
                         received.removeAll()
                         XCTAssertTrue(coordinator.activateNonMarkdownLink(url, commandKey: commandKey))
                         XCTAssertEqual(received.count, 1)
-                        XCTAssertEqual(received.first?.0, commandKey ? commandAction : clickAction)
-                        XCTAssertEqual(received.first?.1, url.standardizedFileURL)
+                        let expectedAction: LinkedFileAction = folders.contains(url) ? .revealInFinder
+                            : (commandKey ? commandAction : clickAction)
+                        XCTAssertEqual(received.first?.0, expectedAction)
+                        XCTAssertEqual(received.first?.1.path, url.standardizedFileURL.path)
                     }
                 }
             }

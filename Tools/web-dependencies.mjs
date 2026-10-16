@@ -144,6 +144,7 @@ function generatedNotices(metadata) {
         + `License: ${item.license}\n`
         + `Source: ${item.source}\n\n`
         + `${item.licenseText}`);
+    sections.push(readFileSync(join(toolsDirectory, "Licenses/Sparkle.txt"), "utf8").trim());
     sections.push(`KaTeX fonts
 License: SIL Open Font License 1.1
 Source: https://github.com/KaTeX/KaTeX

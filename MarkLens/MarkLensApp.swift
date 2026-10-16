@@ -17,7 +17,7 @@ struct MarkLensApp: App {
 #endif
 #if os(macOS)
     @StateObject private var releaseNotesCoordinator = ReleaseNotesCoordinator()
-    @StateObject private var updateChecker = UpdateChecker()
+    @StateObject private var appUpdater = AppUpdater()
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
 #endif
     @FocusedValue(\.printAction) private var printAction
@@ -54,7 +54,6 @@ struct MarkLensApp: App {
 #endif
 #if os(macOS)
                 .environmentObject(releaseNotesCoordinator)
-                .environmentObject(updateChecker)
                 .onAppear {
                     // Make sure the app stops after the last window has been closed
                     appDelegate.exitAfterLastWindow = true
@@ -104,6 +103,10 @@ struct MarkLensApp: App {
                 Button("About MarkLens") {
                     showAboutPanel()
                 }
+                Button("Check for Updates…") {
+                    appUpdater.checkForUpdates()
+                }
+                .disabled(!appUpdater.canCheckForUpdates)
             }
         }
 #endif
@@ -135,7 +138,7 @@ struct MarkLensApp: App {
         Settings {
             MarkLensSettingsView()
                 .environmentObject(appDelegate.localDocumentAccess)
-                .environmentObject(updateChecker)
+                .environmentObject(appUpdater)
         }
 #endif
     }

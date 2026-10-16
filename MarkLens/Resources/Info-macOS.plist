@@ -46,5 +46,19 @@
 			</dict>
 		</dict>
 	</array>
+	<key>MarkLensReleaseCommit</key>
+	<string></string>
+	<key>SUFeedURL</key>
+	<string>https://pd95.github.io/MarkLens/updates/appcast.xml</string>
+	<key>SUPublicEDKey</key>
+	<string>$(SPARKLE_PUBLIC_ED_KEY)</string>
+	<key>SUEnableInstallerLauncherService</key>
+	<true/>
+	<key>SUEnableAutomaticChecks</key>
+	<true/>
+	<key>SUAutomaticallyUpdate</key>
+	<false/>
+	<key>SUScheduledCheckInterval</key>
+	<integer>604800</integer>
 </dict>
 </plist>

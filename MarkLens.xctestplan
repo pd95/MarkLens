@@ -1,0 +1,35 @@
+{
+  "configurations": [
+    {
+      "id": "A3100000-0000-0000-0000-000000000010",
+      "name": "Default",
+      "options": {}
+    }
+  ],
+  "defaultOptions": {
+    "targetForVariableExpansion": {
+      "containerPath": "container:MarkLens.xcodeproj",
+      "identifier": "17FBBD7C2F0831EC00BEAA3E",
+      "name": "MarkLens"
+    }
+  },
+  "testTargets": [
+    {
+      "parallelizable": false,
+      "target": {
+        "containerPath": "container:MarkLens.xcodeproj",
+        "identifier": "A10000012FC0000000000004",
+        "name": "MarkLensTests"
+      }
+    },
+    {
+      "parallelizable": false,
+      "target": {
+        "containerPath": "container:MarkLens.xcodeproj",
+        "identifier": "178AADE22FB9D6A10086D069",
+        "name": "MarkLensUITests"
+      }
+    }
+  ],
+  "version": 1
+}

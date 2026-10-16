@@ -36,6 +36,6 @@ struct MarkLensSettingsView: View {
 #Preview {
     MarkLensSettingsView()
         .environmentObject(LocalDocumentAccess())
-        .environmentObject(UpdateChecker())
+        .environmentObject(AppUpdater())
 }
 #endif

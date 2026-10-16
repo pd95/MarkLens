@@ -170,7 +170,6 @@ struct ContentView: View {
     @EnvironmentObject private var documentNavigation: DocumentNavigationCoordinator
     @EnvironmentObject private var documentTabs: DocumentTabCoordinator
     @EnvironmentObject private var releaseNotesCoordinator: ReleaseNotesCoordinator
-    @EnvironmentObject private var updateChecker: UpdateChecker
 #endif
     @EnvironmentObject private var localDocumentAccess: LocalDocumentAccess
     @AppStorage(AppearancePreferences.customCSSKey)
@@ -198,7 +197,6 @@ struct ContentView: View {
     @State private var externalReloadRetryTask: Task<Void, Never>?
     @State private var externalReloadRetryAttempt = 0
     @State private var externalReloadErrorDescription: String?
-    @State private var isUpdatePopoverPresented = false
     @State private var failedLocalImageURLs: Set<URL> = []
     @State private var wikiLinkMatches: [URL] = []
     @State private var wikiLinkMatchesRoot: URL?
@@ -445,41 +443,6 @@ struct ContentView: View {
                     }
                 }
 
-                if let release = updateChecker.availableRelease {
-                    ToolbarItem(placement: .primaryAction) {
-                        Button {
-                            isUpdatePopoverPresented = true
-                        } label: {
-                            ViewThatFits(in: .horizontal) {
-                                HStack(spacing: 6) {
-                                    Image(systemName: "arrow.down.circle")
-                                        .foregroundStyle(Color.accentColor)
-                                    Text("Update Available")
-                                }
-
-                                Image(systemName: "arrow.down.circle")
-                                    .foregroundStyle(Color.accentColor)
-                            }
-                        }
-                        .buttonStyle(.bordered)
-                        .help("MarkLens \(release.displayVersion) is available")
-                        .accessibilityLabel("Update available: MarkLens \(release.displayVersion)")
-                        .accessibilityIdentifier("updateAvailableButton")
-                        .popover(isPresented: $isUpdatePopoverPresented, arrowEdge: .top) {
-                            UpdateAvailablePopover(
-                                release: release,
-                                installedVersion: updateChecker.currentVersion,
-                                onCheckLater: updateChecker.checkLater,
-                                onSkipVersion: updateChecker.skipAvailableVersion
-                            )
-                        }
-                    }
-
-                    if #available(macOS 26.0, *) {
-                        ToolbarSpacer()
-                    }
-                }
-
                 ToolbarItemGroup(placement: .primaryAction) {
                     Button {
                         requestRenderedOutput(.print)
@@ -589,7 +552,6 @@ struct ContentView: View {
             if releaseNotesCoordinator.claimAutomaticPresentation() {
                 openWindow(id: ReleaseNotesCoordinator.windowID)
             }
-            await updateChecker.checkIfDue()
         }
         .onAppear {
             startExternalFileMonitor()
@@ -645,9 +607,6 @@ struct ContentView: View {
                 return
             }
             resumeDeferredExternalChange()
-            Task {
-                await updateChecker.checkIfDue()
-            }
         }
         .quickLookPreview($linkedFilePreview.previewURL)
         .onChange(of: isRawEditing) {
@@ -2237,7 +2196,6 @@ private struct PreviewFindBar: View {
         .environmentObject(LocalDocumentAccess())
         .environmentObject(DocumentNavigationCoordinator())
         .environmentObject(DocumentTabCoordinator())
-        .environmentObject(UpdateChecker())
         .environmentObject(ReleaseNotesCoordinator())
 #else
     ContentView(document: MarkdownDocument(text: MarkdownDocument.starterText))

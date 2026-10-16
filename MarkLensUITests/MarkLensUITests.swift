@@ -332,26 +332,29 @@ final class MarkLensUITests: XCTestCase {
     }
 
     @MainActor
-    func testUpdatePopoverShowsMissedChangesAndDirectDownload() throws {
+    func testUpdateMenuAndSettingsUseTheUpdater() throws {
         let app = XCUIApplication()
-        app.launchEnvironment["MARKLENS_MOCK_UPDATE_VERSION"] = "99.0.0"
+        app.launchEnvironment["MARKLENS_UPDATER_UI_TEST"] = "1"
         let preview = app.openDocument(named: "sample", fileExtension: "md")
         defer { preview.terminate() }
-
-        preview.verifyUpdatePopover()
-        capture(app, name: "update-release-notes-popover")
-        preview.remindAboutUpdateLater()
-    }
-
-    @MainActor
-    func testUpdatePopoverCanSkipVersion() throws {
-        let app = XCUIApplication()
-        app.launchEnvironment["MARKLENS_MOCK_UPDATE_VERSION"] = "99.0.0"
-        let preview = app.openDocument(named: "sample", fileExtension: "md")
-        defer { preview.terminate() }
-
-        preview.verifyUpdatePopover()
-        preview.skipAvailableUpdate()
+        let appMenu = app.menuBars.menuBarItems["MarkLens"]
+        appMenu.click()
+        let check = appMenu.menus.menuItems["Check for Updates…"]
+        XCTAssertTrue(check.waitForExistence(timeout: 5), app.menuBars.debugDescription)
+        XCTAssertTrue(check.isEnabled)
+        check.click()
+        app.typeKey(",", modifierFlags: .command)
+        let updates = app.buttons["Updates"].firstMatch
+        if updates.waitForExistence(timeout: 3) { updates.click() }
+        else { app.radioButtons["Updates"].firstMatch.click() }
+        XCTAssertTrue(app.buttons["checkForUpdatesButton"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["lastUpdateCheckDate"].waitForExistence(timeout: 5))
+        let automatic = app.descendants(matching: .any)["automaticUpdateChecksToggle"].firstMatch
+        XCTAssertTrue(automatic.waitForExistence(timeout: 5))
+        automatic.click()
+        XCTAssertTrue(app.buttons["checkForUpdatesButton"].isEnabled)
+        XCTAssertFalse(app.descendants(matching: .any)["automaticUpdateInstallationToggle"].firstMatch.isEnabled)
+        capture(app, name: "update-settings")
     }
 
     @MainActor
@@ -679,58 +682,6 @@ private struct MarkLensAppHandle {
 
     var installedReleaseNotesWindow: XCUIElement {
         app.windows["installed-release-notes"].firstMatch
-    }
-
-    func verifyUpdatePopover() {
-        let updateButton = app.buttons["updateAvailableButton"].firstMatch
-        XCTAssertTrue(
-            updateButton.waitForExistence(timeout: 5),
-            "Expected the mocked update indicator to appear."
-        )
-        updateButton.click()
-
-        XCTAssertTrue(
-            app.staticTexts["What’s New"].firstMatch.waitForExistence(timeout: 5),
-            "Expected the expanded release-notes popover."
-        )
-        let downloadButton = app.buttons["Download Update"].firstMatch
-        XCTAssertTrue(
-            downloadButton.waitForExistence(timeout: 5),
-            "Expected a direct download action for the release ZIP."
-        )
-        XCTAssertTrue(downloadButton.isHittable, "Expected the download action to remain on-screen.")
-        XCTAssertTrue(
-            app.buttons["Remind Me Later"].firstMatch.waitForExistence(timeout: 5),
-            "Expected the update reminder action."
-        )
-        XCTAssertTrue(
-            app.buttons["Skip This Version"].firstMatch.waitForExistence(timeout: 5),
-            "Expected the version skip action."
-        )
-        XCTAssertTrue(
-            app.staticTexts["99.0.0"].firstMatch.waitForExistence(timeout: 5),
-            "Expected the newest changelog section."
-        )
-        XCTAssertTrue(
-            app.staticTexts["98.0.0"].firstMatch.waitForExistence(timeout: 5),
-            "Expected an earlier missed changelog section."
-        )
-    }
-
-    func remindAboutUpdateLater() {
-        app.buttons["Remind Me Later"].firstMatch.click()
-        XCTAssertTrue(
-            app.buttons["updateAvailableButton"].firstMatch.waitForNonExistence(timeout: 5),
-            "Expected Remind Me Later to remove the update badge."
-        )
-    }
-
-    func skipAvailableUpdate() {
-        app.buttons["Skip This Version"].firstMatch.click()
-        XCTAssertTrue(
-            app.buttons["updateAvailableButton"].firstMatch.waitForNonExistence(timeout: 5),
-            "Expected Skip This Version to remove the update badge."
-        )
     }
 
     func verifyInstalledReleaseNotes(includesPreviousRelease: Bool) {

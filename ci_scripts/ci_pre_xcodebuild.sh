@@ -6,6 +6,7 @@ REPOSITORY_ROOT="${SCRIPT_DIR:h}"
 PROJECT_FILE="${PROJECT_FILE:-$REPOSITORY_ROOT/MarkLens.xcodeproj/project.pbxproj}"
 BUILD_INFO_FILE="${BUILD_INFO_FILE:-$REPOSITORY_ROOT/MarkLens/BuildInfo.swift}"
 CHANGELOG_FILE="${CHANGELOG_FILE:-$REPOSITORY_ROOT/CHANGELOG.md}"
+INFO_PLIST_FILE="${INFO_PLIST_FILE:-$REPOSITORY_ROOT/MarkLens/Resources/Info-macOS.plist}"
 
 if [[ -z "${CI_TAG:-}" ]]; then
     echo "No CI_TAG set; leaving MARKETING_VERSION and CURRENT_PROJECT_VERSION unchanged."
@@ -37,6 +38,7 @@ if ! awk -v version="$VERSION" '
         heading = $0
         sub(/^##[[:space:]]+/, "", heading)
         sub(/[[:space:]]+$/, "", heading)
+        sub(/[[:space:]]+\(Unreleased\)$/, "", heading)
         if (substr(heading, 1, 1) == "[" && substr(heading, length(heading), 1) == "]") {
             heading = substr(heading, 2, length(heading) - 2)
         }
@@ -50,11 +52,40 @@ if ! awk -v version="$VERSION" '
     exit 1
 fi
 
+# Signing keys are provisioned separately; only the public key enters build settings.
+if [[ "$TAG_VERSION" != *-test* ]]; then
+    python3 - <<'CHECK_KEY'
+import base64, os, sys
+try:
+    key = os.environ.get("SPARKLE_PUBLIC_ED_KEY", "")
+    valid = len(base64.b64decode(key, validate=True)) == 32
+except ValueError:
+    valid = False
+if not valid:
+    sys.exit("error: Configure SPARKLE_PUBLIC_ED_KEY with the public key from Sparkle generate_keys.")
+CHECK_KEY
+    perl -0pi -e 's/SPARKLE_PUBLIC_ED_KEY = [^;]*;/SPARKLE_PUBLIC_ED_KEY = "$ENV{SPARKLE_PUBLIC_ED_KEY}";/g' "$PROJECT_FILE"
+fi
+
 BUILD_NUMBER="${CI_BUILD_NUMBER:-}"
 if [[ -z "$BUILD_NUMBER" ]]; then
     BUILD_NUMBER="$(git rev-list --count HEAD)"
 fi
 SHORT_COMMIT="$(git rev-parse --short=12 HEAD)"
+FULL_COMMIT="$(git rev-parse HEAD)"
+if [[ -n "${CI_COMMIT:-}" && "$CI_COMMIT" != "$FULL_COMMIT" ]]; then
+    echo "error: CI_COMMIT does not match the checked-out release commit"
+    exit 1
+fi
+# This value becomes part of the signed bundle, binding the retrieved app to its source.
+python3 - "$INFO_PLIST_FILE" "$FULL_COMMIT" <<'WRITE_COMMIT'
+from pathlib import Path
+import plistlib, sys
+path = Path(sys.argv[1])
+info = plistlib.loads(path.read_bytes())
+info["MarkLensReleaseCommit"] = sys.argv[2]
+path.write_bytes(plistlib.dumps(info, sort_keys=False))
+WRITE_COMMIT
 
 if [[ ! "$BUILD_NUMBER" =~ '^[0-9]+$' ]]; then
     echo "error: Build number '$BUILD_NUMBER' is not numeric"

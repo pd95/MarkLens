@@ -1,0 +1,86 @@
+name: Publish Notarized Update
+
+on:
+  repository_dispatch:
+    types: [publish-notarized-update]
+  workflow_dispatch:
+    inputs:
+      cloud_build_id:
+        description: Xcode Cloud build ID to retry
+        required: true
+        type: string
+      cloud_build_number:
+        description: Xcode Cloud build number
+        required: true
+        type: string
+      release_tag:
+        description: Release tag (for example v1.10.0-rc1)
+        required: true
+        type: string
+      release_commit:
+        description: Full commit SHA of the release tag
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: marklens-update-publication
+  cancel-in-progress: false
+
+env:
+  CLOUD_BUILD_ID: ${{ github.event.client_payload.CLOUD_BUILD_ID || inputs.cloud_build_id }}
+  CLOUD_BUILD_NUMBER: ${{ github.event.client_payload.CLOUD_BUILD_NUMBER || inputs.cloud_build_number }}
+  RELEASE_TAG: ${{ github.event.client_payload.RELEASE_TAG || inputs.release_tag }}
+  RELEASE_COMMIT: ${{ github.event.client_payload.RELEASE_COMMIT || inputs.release_commit }}
+
+jobs:
+  completed-artifact:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v6
+      - name: Wait for Cloud notarization and download its stapled artifact
+        env:
+          APP_STORE_CONNECT_API_PRIVATE_KEY: ${{ secrets.APP_STORE_CONNECT_API_PRIVATE_KEY }}
+          APP_STORE_CONNECT_API_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
+          APP_STORE_CONNECT_API_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_API_ISSUER_ID }}
+        run: python3 ci_scripts/cloud_artifact.py "$RUNNER_TEMP/notarized-app.zip"
+      - uses: actions/upload-artifact@v6
+        with:
+          name: cloud-notarized-app
+          path: ${{ runner.temp }}/notarized-app.zip
+          compression-level: 0
+          retention-days: 7
+
+  publish:
+    needs: completed-artifact
+    runs-on: macos-26
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+      - name: Verify the tag commit before using release content
+        run: |
+          actual_commit="$(git rev-parse HEAD)"
+          test "$actual_commit" = "$RELEASE_COMMIT"
+      - uses: actions/download-artifact@v6
+        with:
+          name: cloud-notarized-app
+          path: ${{ runner.temp }}/cloud-artifact
+      - name: Prepare and validate the completed app
+        run: python3 ci_scripts/prepare_notarized_app.py "$RUNNER_TEMP/cloud-artifact/notarized-app.zip" "$RUNNER_TEMP/MarkLens.app"
+      - name: Fetch pinned Sparkle tools
+        run: python3 ci_scripts/fetch_sparkle_tools.py "$RUNNER_TEMP/sparkle-tools" "$GITHUB_ENV"
+      - name: Publish the signed update and feed
+        env:
+          GITHUB_RELEASE_TOKEN: ${{ secrets.GITHUB_RELEASE_TOKEN }}
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          CI_XCODEBUILD_ACTION: archive
+          CI_XCODEBUILD_EXIT_CODE: "0"
+          CI_TAG: ${{ env.RELEASE_TAG }}
+          CI_DEVELOPER_ID_SIGNED_APP_PATH: ${{ runner.temp }}/MarkLens.app
+        run: python3 ci_scripts/release_updates.py

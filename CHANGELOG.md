@@ -2,6 +2,8 @@
 
 ## 1.10.0 (Unreleased)
 
+- Install macOS updates in MarkLens with Sparkle’s native update window, cumulative missed-release notes, Stable and Preview channels, and optional automatic installation. Existing automatic-check preferences are preserved.
+
 - Choose Quick Look, Reveal in Finder, or Open in Default App for local files handled outside MarkLens, with separate normal-click and Command-click actions in Navigation settings and explicit context-menu actions.
 - Folder links always reveal in Finder, including Command-click, and only offer Reveal in Finder and Copy Link Address in their context menu.
 - Peek at linked files with the Quick Look context action, including Markdown documents and wiki pages, without leaving the current reading position. Press Escape to dismiss the preview.

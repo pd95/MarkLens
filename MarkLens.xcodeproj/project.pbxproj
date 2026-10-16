@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		A31000000000000000000001 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = A31000000000000000000003 /* Sparkle */; platformFilters = (macos, ); };
 		17A70A872F0AB78300D93FE9 /* MarkdownPipeline in Frameworks */ = {isa = PBXBuildFile; productRef = 17A70A852F0AB78300D93FE9 /* MarkdownPipeline */; };
 		17A70A882F0AB78300D93FE9 /* MarkdownPipeline in Frameworks */ = {isa = PBXBuildFile; productRef = 17A70A862F0AB78300D93FE9 /* MarkdownPipeline */; };
 		17CD184E2F08337200899189 /* Quartz.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 17CD184D2F08337200899189 /* Quartz.framework */; platformFilters = (macos, ); };
@@ -65,6 +66,7 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		A31000000000000000000006 /* MarkLens.xctestplan */ = {isa = PBXFileReference; lastKnownFileType = text; path = MarkLens.xctestplan; sourceTree = "<group>"; };
 		17208FE62F09A33F000638BE /* QuickLook.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = QuickLook.framework; path = System/Library/Frameworks/QuickLook.framework; sourceTree = SDKROOT; };
 		172772F52FBA65D9003F7E82 /* CHANGELOG.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = CHANGELOG.md; sourceTree = "<group>"; };
 		17421AFF2F09491800C7EE6C /* AGENTS.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = AGENTS.md; sourceTree = "<group>"; };
@@ -97,7 +99,7 @@
 		17FBBD892F0831ED00BEAA3E /* Exceptions for "MarkLens" folder in "MarkLens" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
-				Resources/Info-macOS.plist,
+				"Resources/Info-macOS.plist",
 				Resources/Info.plist,
 				"WebResources/preview-search.js",
 			);
@@ -180,6 +182,7 @@
 			files = (
 				17CD18882F0862FD00899189 /* Markdown in Frameworks */,
 				17A70A872F0AB78300D93FE9 /* MarkdownPipeline in Frameworks */,
+				A31000000000000000000001 /* Sparkle in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -206,6 +209,7 @@
 			isa = PBXGroup;
 			children = (
 				17421B012F0950BC00C7EE6C /* README.md */,
+				A31000000000000000000006 /* MarkLens.xctestplan */,
 				172772F52FBA65D9003F7E82 /* CHANGELOG.md */,
 				17421AFF2F09491800C7EE6C /* AGENTS.md */,
 				17421B002F0950BC00C7EE6C /* LICENSE */,
@@ -304,6 +308,7 @@
 			packageProductDependencies = (
 				17CD18872F0862FD00899189 /* Markdown */,
 				17A70A852F0AB78300D93FE9 /* MarkdownPipeline */,
+				A31000000000000000000003 /* Sparkle */,
 			);
 			productName = MarkLens;
 			productReference = 17FBBD7D2F0831EC00BEAA3E /* MarkLens.app */;
@@ -368,6 +373,7 @@
 			mainGroup = 17FBBD742F0831EC00BEAA3E;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
+				A31000000000000000000004 /* XCRemoteSwiftPackageReference "Sparkle" */,
 				17CD18862F0862FD00899189 /* XCRemoteSwiftPackageReference "swift-markdown" */,
 				17A70A842F0AB78300D93FE9 /* XCLocalSwiftPackageReference "MarkdownPipeline" */,
 			);
@@ -594,7 +600,9 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				SPARKLE_PUBLIC_ED_KEY = "";
 				CODE_SIGN_ENTITLEMENTS = MarkLens/Resources/MarkLens.entitlements;
+				"CODE_SIGN_ENTITLEMENTS[sdk=macosx*]" = "MarkLens/Resources/MarkLens-macOS.entitlements";
 				DEAD_CODE_STRIPPING = YES;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -647,7 +655,9 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				SPARKLE_PUBLIC_ED_KEY = "";
 				CODE_SIGN_ENTITLEMENTS = MarkLens/Resources/MarkLens.entitlements;
+				"CODE_SIGN_ENTITLEMENTS[sdk=macosx*]" = "MarkLens/Resources/MarkLens-macOS.entitlements";
 				DEAD_CODE_STRIPPING = YES;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -933,6 +943,11 @@
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCRemoteSwiftPackageReference section */
+		A31000000000000000000004 /* XCRemoteSwiftPackageReference "Sparkle" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/sparkle-project/Sparkle";
+			requirement = {kind = exactVersion; version = 2.10.0; };
+		};
 		17CD18862F0862FD00899189 /* XCRemoteSwiftPackageReference "swift-markdown" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/swiftlang/swift-markdown";
@@ -944,6 +959,11 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		A31000000000000000000003 /* Sparkle */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A31000000000000000000004 /* XCRemoteSwiftPackageReference "Sparkle" */;
+			productName = Sparkle;
+		};
 		17A70A852F0AB78300D93FE9 /* MarkdownPipeline */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = 17A70A842F0AB78300D93FE9 /* XCLocalSwiftPackageReference "MarkdownPipeline" */;

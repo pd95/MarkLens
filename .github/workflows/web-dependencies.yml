@@ -14,6 +14,7 @@ on:
       - "Tools/package.json"
       - "Tools/web-dependencies-smoke.mjs"
       - "Tools/web-dependencies.mjs"
+      - "Tools/Licenses/**"
       - "WEB_DEPENDENCIES.json"
   push:
     branches:
@@ -29,6 +30,7 @@ on:
       - "Tools/package.json"
       - "Tools/web-dependencies-smoke.mjs"
       - "Tools/web-dependencies.mjs"
+      - "Tools/Licenses/**"
       - "WEB_DEPENDENCIES.json"
 
 permissions:

@@ -145,8 +145,9 @@ Only macOS builds embed Sparkle; Quick Look and mobile builds do not run an upda
 5. **Disable the built-in Notarize – macOS post-action** in the Cloud Release
    workflow. Keep the Archive action’s **Deployment Preparation** set to
    **None / Ohne**. The script explicitly exports `CI_ARCHIVE_PATH` using
-   `xcodebuild -exportArchive`, automatic Developer ID signing, Cloud’s
-   `CI_TEAM_ID`, and the Apple API credentials above. If Cloud already supplies
+   `xcodebuild -exportArchive`, automatic Developer ID signing, the archive's
+   existing signing team, and the Apple API credentials above. No `CI_TEAM_ID`
+   variable needs to be configured. If Cloud already supplies
    a Developer ID export, the script reuses it. The original archive is never
    uploaded directly. The script then submits once using
    `notarytool --wait`, checks for `Accepted`, staples the ticket, and verifies

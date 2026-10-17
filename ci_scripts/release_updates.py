@@ -327,15 +327,13 @@ def exported_app(environment):
     archive = environment.get("CI_ARCHIVE_PATH", "")
     if not archive or not Path(archive).is_dir():
         raise ReleaseError("No Developer ID export or CI_ARCHIVE_PATH is available; this release requires a macOS Archive action")
-    team = environment.get("CI_TEAM_ID", "")
-    if not re.fullmatch(r"[A-Z0-9]{10}", team):
-        raise ReleaseError("Missing or invalid CI_TEAM_ID for Developer ID export")
     with tempfile.TemporaryDirectory(prefix="marklens-export-") as temporary:
         directory = Path(temporary)
         options = directory / "ExportOptions.plist"
         options.write_bytes(plistlib.dumps({
             "method": "developer-id", "destination": "export", "signingStyle": "automatic",
-            "teamID": team, "manageAppVersionAndBuildNumber": False,
+            # Let Xcode use the archive's signing team; CI_TEAM_ID isn't required.
+            "manageAppVersionAndBuildNumber": False,
         }))
         destination = directory / "app"
         print("Exporting the archive with Developer ID signing before notarization.", flush=True)

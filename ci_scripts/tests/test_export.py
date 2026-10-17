@@ -16,12 +16,16 @@ AUTH = {"APP_STORE_CONNECT_API_PRIVATE_KEY": KEY, "APP_STORE_CONNECT_API_KEY_ID"
 
 
 class ExportTests(unittest.TestCase):
-    def exercise_export(self, *, configured=None, fail=False, consumer_failure=False):
+    def exercise_export(self, *, configured=None, fail=False, consumer_failure=False, team="ABCDEFGHIJ"):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             archive = root / "MarkLens.xcarchive"
             archive.mkdir()
             environment = dict(AUTH, CI_ARCHIVE_PATH=str(archive))
+            if team is None:
+                environment.pop("CI_TEAM_ID", None)
+            else:
+                environment["CI_TEAM_ID"] = team
             if configured is not None:
                 directory = root / "configured"
                 if configured == "empty":
@@ -35,7 +39,7 @@ class ExportTests(unittest.TestCase):
                 self.assertIn("-allowProvisioningUpdates", args)
                 options = plistlib.loads(Path(args[args.index("-exportOptionsPlist") + 1]).read_bytes())
                 self.assertEqual(options, {"method": "developer-id", "destination": "export", "signingStyle": "automatic",
-                                           "teamID": "ABCDEFGHIJ", "manageAppVersionAndBuildNumber": False})
+                                           "manageAppVersionAndBuildNumber": False})
                 key = Path(args[args.index("-authenticationKeyPath") + 1])
                 keys.append(key)
                 self.assertEqual(key.stat().st_mode & 0o777, 0o600)
@@ -88,10 +92,14 @@ class ExportTests(unittest.TestCase):
                     run.assert_not_called()
             self.assertTrue(app.exists())
 
-    def test_missing_archive_or_invalid_team_fail_before_export(self):
+    def test_export_uses_archive_team_instead_of_ci_environment_team(self):
+        for team in [None, "", "69a6de74-4168-47e3-e053-5b8c7c11a4d1"]:
+            with self.subTest(team=team):
+                self.exercise_export(team=team)
+
+    def test_missing_archive_fails_before_export(self):
         with tempfile.TemporaryDirectory() as temporary, patch.object(release, "run") as run:
-            for environment in [{}, {"CI_ARCHIVE_PATH": "/nonexistent"},
-                                {"CI_ARCHIVE_PATH": temporary}, {"CI_ARCHIVE_PATH": temporary, "CI_TEAM_ID": "invalid"}]:
+            for environment in [{}, {"CI_ARCHIVE_PATH": "/nonexistent"}]:
                 with self.subTest(environment=environment), self.assertRaises(release.ReleaseError):
                     with release.exported_app(environment):
                         self.fail("Invalid export configuration was accepted")

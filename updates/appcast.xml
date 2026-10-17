@@ -1,8 +1,18 @@
-<?xml version="1.0" encoding="utf-8"?>
-<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
-  <channel>
-    <title>MarkLens Updates</title>
-    <link>https://github.com/pd95/MarkLens/releases</link>
-    <description>Signed MarkLens updates will appear here after the first release.</description>
-  </channel>
+<?xml version="1.0" encoding="UTF-8"?>
+<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
+    <channel>
+        <title>MarkLens Updates</title>
+        <link>https://github.com/pd95/MarkLens/releases</link>
+        <description>Signed MarkLens updates will appear here after the first release.</description>
+        <item>
+            <title>MarkLens 1.10.0-rc2</title>
+            <pubDate>Sat, 17 Oct 2026 08:47:50 -0700</pubDate>
+            <sparkle:channel>preview</sparkle:channel>
+            <sparkle:version>66</sparkle:version>
+            <sparkle:shortVersionString>1.10.0-rc2</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>15.6</sparkle:minimumSystemVersion>
+            <sparkle:releaseNotesLink>https://pd95.github.io/MarkLens/updates/MarkLens-v1.10.0-rc2.md</sparkle:releaseNotesLink>
+            <enclosure url="https://github.com/pd95/MarkLens/releases/download/v1.10.0-rc2/MarkLens-v1.10.0-rc2.zip" length="9076819" type="application/octet-stream" sparkle:edSignature="EAlyt6FHLU9plVXGFdNtUQVwtXgIIJDZ/deYPlb701Y4KfwDwMWSjOMtCLKxuEk+UsiC90BeO41OvBPpMMMADQ=="/>
+        </item>
+    </channel>
 </rss>

@@ -118,7 +118,7 @@ validate_app() {
     [[ $(printf '%s' "$public_key" | openssl base64 -d -A | wc -c | tr -d ' ') == 32 ]] || fail 'App is missing its Sparkle public key.'
     [[ -d $app/Contents/PlugIns/QuickLookPreview_macOS.appex && -d $app/Contents/Frameworks/Sparkle.framework ]] || fail 'Quick Look or Sparkle is missing.'
     codesign --verify --deep --strict "$app"
-    codesign --verify --strict -R 'anchor apple generic and certificate leaf[subject.OU] = "P8CC95REUG" and certificate leaf[field.1.2.840.113635.100.6.1.13] exists' "$app"
+    codesign --verify --strict -R '=anchor apple generic and certificate leaf[subject.OU] = "P8CC95REUG" and certificate leaf[field.1.2.840.113635.100.6.1.13] exists' "$app"
     xcrun stapler validate "$app"
     spctl --assess --type execute "$app"
 }

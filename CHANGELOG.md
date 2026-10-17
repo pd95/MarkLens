@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.10.0 (Unreleased)
+## 1.10.0
 
 - Install macOS updates in MarkLens with Sparkle’s native update window, cumulative missed-release notes, Stable and Preview channels, and optional automatic installation. Existing automatic-check preferences are preserved.
 

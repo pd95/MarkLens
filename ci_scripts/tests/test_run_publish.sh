@@ -132,6 +132,40 @@ if grep -q 'Bearer\|private-test-value' "$work/curl.log"; then fail 'Credential 
 if (apple_get https://untrusted.test/api "$work/api.json") > "$work/error" 2>&1; then fail 'Apple API token forwarded to another host.'; fi
 echo 'PASS: real ES256 JWT has correct claims and no bearer token in curl arguments'
 
+# codesign -R accepts inline text only with a leading '='; otherwise it opens
+# the requirement as a filename. Exercise validate_app's actual invocation.
+(
+    app=$work/MarkLens.app
+    mkdir -p "$app/Contents/PlugIns/QuickLookPreview_macOS.appex" "$app/Contents/Frameworks/Sparkle.framework"
+    version=1.10.0
+    plist() {
+        case "$1" in
+            CFBundleIdentifier) echo ch.doapp.MarkLens ;;
+            CFBundleShortVersionString) echo 1.10.0 ;;
+            CFBundleVersion) echo 81 ;;
+            SUFeedURL) echo "$feed_url" ;;
+            SURequireSignedFeed) echo false ;;
+            SUPublicEDKey) echo AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA= ;;
+            *) return 1 ;;
+        esac
+    }
+    codesign() {
+        while [[ $# -gt 0 ]]; do
+            if [[ $1 == -R ]]; then
+                [[ $2 == '=anchor apple generic'* && $2 == *P8CC95REUG* && $2 == *1.2.840.113635.100.6.1.13* ]] || return 2
+                echo checked > "$work/requirement-checked"
+                break
+            fi
+            shift
+        done
+    }
+    xcrun() { [[ $1 == stapler && $2 == validate ]]; }
+    spctl() { [[ $1 == --assess ]]; }
+    validate_app "$app"
+    [[ -f $work/requirement-checked ]]
+)
+echo 'PASS: Developer ID verification passes an inline requirement, not a filename'
+
 # Cloud selection must match the reference, commit and Release workflow together.
 CI_BUILD_ID=publish-run
 CI_COMMIT=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa

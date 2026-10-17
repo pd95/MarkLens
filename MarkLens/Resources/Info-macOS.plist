@@ -46,8 +46,6 @@
 			</dict>
 		</dict>
 	</array>
-	<key>MarkLensReleaseCommit</key>
-	<string></string>
 	<key>SUFeedURL</key>
 	<string>https://pd95.github.io/MarkLens/updates/appcast.xml</string>
 	<key>SUPublicEDKey</key>

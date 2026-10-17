@@ -503,8 +503,11 @@ struct MarkdownPipelineHTMLRenderingTests {
 
         #expect(document.html.contains("data-marklens-source-line=\"2\" aria-hidden=\"true\""))
         #expect(document.html.contains("data-marklens-source-line=\"3\" aria-hidden=\"true\""))
-        #expect(document.html.contains("let first"))
-        #expect(document.html.contains("let second"))
+        let codeRange = try #require(document.html.range(of: #"<code\b[^>]*>[\s\S]*?</code>"#, options: .regularExpression))
+        let codeText = String(document.html[codeRange]).replacingOccurrences(
+            of: "<[^>]+>", with: "", options: .regularExpression
+        )
+        #expect(codeText == "let first = 1\nlet second = 2\n")
     }
 
     @Test func rendersHeadingAnchorsWithDeduping() throws {

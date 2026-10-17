@@ -361,11 +361,16 @@ def exported_app(environment):
     with tempfile.TemporaryDirectory(prefix="marklens-export-") as temporary:
         directory = Path(temporary)
         options = directory / "ExportOptions.plist"
-        options.write_bytes(plistlib.dumps({
-            "method": "developer-id", "destination": "export", "signingStyle": "automatic",
-            # Let Xcode use the archive's signing team; CI_TEAM_ID isn't required.
-            "manageAppVersionAndBuildNumber": False,
-        }))
+        # Deployment Preparation=None may produce an archive without team metadata.
+        # Supply the project's Developer Portal team explicitly, independently of
+        # the unrelated/missing identifiers exposed by the Cloud environment.
+        settings = plistlib.loads(Path(__file__).with_name("ExportOptions.plist").read_bytes())
+        if (settings.get("method") != "developer-id" or settings.get("signingStyle") != "automatic"
+                or settings.get("destination") != "export"
+                or settings.get("manageAppVersionAndBuildNumber") is not False
+                or not re.fullmatch(r"[A-Z0-9]{10}", settings.get("teamID", ""))):
+            raise ReleaseError("ExportOptions.plist must configure automatic Developer ID export with an explicit team")
+        options.write_bytes(plistlib.dumps(settings))
         destination = directory / "app"
         print("Exporting the archive with Developer ID signing before notarization.", flush=True)
         with apple_api_key(environment) as (key_file, key_id, issuer_id):

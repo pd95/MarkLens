@@ -2,6 +2,7 @@
 """Developer ID export tests without signing infrastructure or real credentials."""
 from pathlib import Path
 import plistlib
+import re
 import sys
 import tempfile
 import unittest
@@ -39,7 +40,7 @@ class ExportTests(unittest.TestCase):
                 self.assertIn("-allowProvisioningUpdates", args)
                 options = plistlib.loads(Path(args[args.index("-exportOptionsPlist") + 1]).read_bytes())
                 self.assertEqual(options, {"method": "developer-id", "destination": "export", "signingStyle": "automatic",
-                                           "manageAppVersionAndBuildNumber": False})
+                                           "teamID": "P8CC95REUG", "manageAppVersionAndBuildNumber": False})
                 key = Path(args[args.index("-authenticationKeyPath") + 1])
                 keys.append(key)
                 self.assertEqual(key.stat().st_mode & 0o777, 0o600)
@@ -92,10 +93,17 @@ class ExportTests(unittest.TestCase):
                     run.assert_not_called()
             self.assertTrue(app.exists())
 
-    def test_export_uses_archive_team_instead_of_ci_environment_team(self):
+    def test_explicit_project_team_handles_archives_without_team_metadata(self):
         for team in [None, "", "69a6de74-4168-47e3-e053-5b8c7c11a4d1"]:
             with self.subTest(team=team):
                 self.exercise_export(team=team)
+
+    def test_export_options_team_matches_project_signing_team(self):
+        scripts = Path(release.__file__).parent
+        settings = plistlib.loads((scripts / "ExportOptions.plist").read_bytes())
+        project = (scripts.parent / "MarkLens.xcodeproj/project.pbxproj").read_text()
+        teams = set(re.findall(r"DEVELOPMENT_TEAM = ([A-Z0-9]{10});", project))
+        self.assertEqual(teams, {settings["teamID"]})
 
     def test_missing_archive_fails_before_export(self):
         with tempfile.TemporaryDirectory() as temporary, patch.object(release, "run") as run:

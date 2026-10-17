@@ -5,6 +5,15 @@
         <link>https://github.com/pd95/MarkLens/releases</link>
         <description>Signed MarkLens updates will appear here after the first release.</description>
         <item>
+            <title>MarkLens 1.10.0</title>
+            <pubDate>Sat, 17 Oct 2026 08:59:36 -0700</pubDate>
+            <sparkle:version>70</sparkle:version>
+            <sparkle:shortVersionString>1.10.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>15.6</sparkle:minimumSystemVersion>
+            <sparkle:releaseNotesLink>https://pd95.github.io/MarkLens/updates/MarkLens-v1.10.0.md</sparkle:releaseNotesLink>
+            <enclosure url="https://github.com/pd95/MarkLens/releases/download/v1.10.0/MarkLens-v1.10.0.zip" length="9076757" type="application/octet-stream" sparkle:edSignature="3lfuvhxTbFWATJV1usJ1TP8yJ3zdpLpaD21XUj8zMVTp8zFNtIbaT2ZJhhzs9I1Q8KosdyOn3moaZwSmYlvABQ=="/>
+        </item>
+        <item>
             <title>MarkLens 1.10.0-rc2</title>
             <pubDate>Sat, 17 Oct 2026 08:47:50 -0700</pubDate>
             <sparkle:channel>preview</sparkle:channel>

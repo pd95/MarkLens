@@ -1,0 +1,133 @@
+## Version 1.10.0
+
+- Install macOS updates in MarkLens with Sparkle’s native update window, cumulative missed-release notes, Stable and Preview channels, and optional automatic installation. Existing automatic-check preferences are preserved.
+
+- Choose Quick Look, Reveal in Finder, or Open in Default App for local files handled outside MarkLens, with separate normal-click and Command-click actions in Navigation settings and explicit context-menu actions.
+- Folder links always reveal in Finder, including Command-click, and only offer Reveal in Finder and Copy Link Address in their context menu.
+- Peek at linked files with the Quick Look context action, including Markdown documents and wiki pages, without leaving the current reading position. Press Escape to dismiss the preview.
+- Show each link’s destination and click action in a rounded hover annotation, with local paths relative to the current document’s folder and immediate updates when pressing or releasing Command.
+- Fixed local Markdown links such as `../../README.md` being blocked by WebKit before reaching MarkLens’s native navigation and file-access handling.
+- Fixed heading links such as `#ABC` and `other.md#ABC` opening without jumping to the destination. Heading fragments now survive document opening, tab navigation, and file-access retries.
+
+## Version 1.9.1
+
+- Fixed automatic preview refresh after repeated external edits and when returning to a tab whose file changed while hidden.
+- Fixed release notes to include the current minor release and all its bugfix releases, while retaining earlier missed changes in automatic upgrade notes.
+
+## Version 1.9.0
+
+- Browse local Markdown and wiki links in the current window. Set the default and choose window or tab behavior in Navigation settings.
+- Open linked documents in native macOS tabs with Command-click or Open in New Tab.
+- Link directly to a Markdown source line, including through `marklens://open` links from other apps. MarkLens scrolls to the rendered line.
+- Follow wiki links with display labels inside tables and links to headings such as `[[note#heading|Label]]`.
+- Reopen document windows at their previous size and position, adjusted to fit smaller displays.
+- Find document navigation in its own Settings tab and linked-image controls in Content & Privacy. The Custom CSS editor now fills the available space in Appearance.
+- Fixed misplaced link context menus, made preview Find toggle from the toolbar while preserving the selected match, clarified Settings controls, and added separate Help commands for current release notes and the full changelog.
+
+## Version 1.8.1
+
+- Improved YAML frontmatter parsing to preserve standard scalar and collection semantics while making wiki links embedded in text values clickable.
+- Disabled smart punctuation, automatic correction, completion, and text detection in Markdown source editors so typed source remains literal.
+- Fixed document autosaves and external-file refreshes to use the native document lifecycle without false conflict prompts, reload loops from unchanged file events, or silently discarded Update and Cancel choices.
+- Improved wiki browsing by monitoring the currently displayed page, skipping unchanged renders, keeping scrolling smooth, starting first-time visits at the true page top, and reliably preserving each history entry's position across Back, Forward, and external updates.
+
+## Version 1.8.0
+
+- Added a collapsible document-details card for YAML frontmatter, with structured rendering for common metadata, nested values, and readable light and dark appearances.
+- Expanded update notifications with a scrollable view of every release missed since the installed version and a direct download link for the release ZIP.
+- Added persistent “Remind Me Later” and “Skip This Version” choices so dismissed update notices return only when requested or when a newer release becomes available.
+- Added offline What’s New notes for the first launch after installation or upgrade, plus the complete bundled changelog from the Help menu.
+
+## Version 1.7.0
+
+- Added Security & Privacy controls for raw HTML, remote resources, Mermaid diagrams, linked local images, and automatic update checks, with safer defaults for untrusted document content.
+- Hardened rendered previews with raw HTML sanitization, a nonce-based content security policy, ephemeral browser data, and stricter navigation and resource-loading boundaries.
+- Made Quick Look previews network-free and escaped raw HTML while retaining bundled fonts and readable Mermaid source.
+- Added in-preview alerts when HTML is disabled or unsafe fragments are filtered, without changing the Markdown source.
+- Improved authorized-folder management with availability status, compact paths, Finder access, per-folder revocation, and confirmation before forgetting all folders.
+- Improved release automation by removing superseded release-candidate entries after a successful final upload while retaining their Git tags.
+
+## Version 1.6.0
+
+- Improved reliability and responsiveness for very large Markdown documents by limiting syntax-highlighting work, virtualizing code-heavy previews, and using scalable native source editors on macOS and iOS.
+- Added language badges and polished controls for code blocks, including collapsed previews, line-count reveal controls, persistent collapse actions, and accessible copy feedback.
+- Reduced preview work while scrolling and preserved source positions when switching between rendered and editing modes.
+- Fixed preview navigation state on iOS and resolved Swift concurrency warnings exposed by clean cross-platform builds.
+- Updated the bundled Mermaid renderer to 11.17.2 to incorporate upstream security fixes.
+
+## Version 1.5.4
+
+- Improved automatic external-file refreshes by updating append-only files promptly, waiting for rewritten files to settle, and bounding refresh delays for continuously changing content.
+
+## Version 1.5.3
+
+- Improved automatic external-file refreshes by preserving the current reading position across rendered-content changes and smoothly crossfading updates to avoid flicker.
+
+## Version 1.5.2
+
+- Improved rendered-preview search by refocusing the find field with Command-F, using selected text as the query, and supporting Return, Command-G, and Shift-Command-G result navigation.
+
+## Version 1.5.1
+
+- Added automatic refresh for open documents changed or atomically replaced by another application, while preserving active source edits when changes conflict.
+- Restored standard Markdown line-break behavior so ordinary newlines remain soft breaks and only trailing spaces or a backslash create visible hard breaks.
+
+## Version 1.5.0
+
+- Added an opt-in update setting for receiving GitHub pre-release builds and release candidates.
+- Added native PDF and portable HTML export, an Open in Preview command, remembered export formats, and self-contained Mermaid and local-image output.
+- Improved printed-document pagination by keeping headings with following content, preventing orphaned code-block borders, and wrapping long code lines for paper output.
+- Enabled new Markdown documents with an editable starter, native untitled-document behavior, and links to the CommonMark and GitHub Flavored Markdown references.
+- Renamed the GitHub repository to MarkLens and corrected the app, Quick Look extension, and test bundle identifiers to use the `ch.doapp` namespace.
+- Fixed unsupported Highlight.js languages on macOS and resolved Swift concurrency warnings ahead of Swift 6 migration.
+
+> [!IMPORTANT]
+> The bundle identifier changed from `com.doapp.MarkLens` to `ch.doapp.MarkLens`. Existing users may need to reauthorize local folders and select MarkLens again as their default Markdown application.
+
+## Version 1.4.0
+
+- Added non-intrusive update notifications that check GitHub Releases weekly and provide direct access to the latest release from the toolbar.
+- Added synchronized scroll positioning between the rendered preview and raw Markdown editor when switching modes.
+- Improved web dependency maintenance with reproducible updates, automated verification, and CI auditing for bundled rendering libraries.
+
+## Version 1.3.0
+
+- Added LaTeX math rendering with KaTeX.
+- Added Mermaid diagram rendering for fenced code blocks.
+- Added appearance settings for custom preview styles, including font family, font size, line height, content width, and custom CSS.
+- Improved preview typography scaling so custom font sizes apply consistently throughout rendered documents.
+
+## Version 1.2.0
+
+- Added support for local Markdown links and linked images, resolved relative to the current document.
+- Added privacy-focused folder access prompts with persistent permissions that can be managed in Settings.
+- Added wiki-style links using `[[note]]`, `[[folder/note]]`, and `[[note|Display text]]` syntax.
+- Added recursive wiki-page discovery within a selected folder, including a searchable chooser for duplicate names.
+- Added in-place wiki browsing with Back and Forward navigation while keeping linked pages read-only.
+
+## Version 1.1.0
+
+- Renamed the app from MarkdownPreview to MarkLens.
+- Added automated Xcode Cloud release builds.
+- Added Developer ID notarization for direct downloads.
+- Added GitHub Release uploads for release candidate and final tags.
+- Added release tag and commit metadata to the About panel.
+
+## Version 1.0.6
+
+- Added search in the rendered Markdown preview and raw editor.
+- Open Markdown links in the browser.
+- Improved rendering performance.
+- Fixed bugs in Markdown preview and editing workflows.
+
+## Version 1.0.5
+
+- Added support for embedded images using `data:image` URLs.
+
+## Version 1.0.4
+
+- Added printing and page setup support, including macOS PDF generation through the print workflow.
+- Added syntax-highlighted Markdown rendering through the shared Markdown pipeline.
+- Added copy buttons for rendered code blocks.
+- Added raw Markdown editing inside the app.
+- Improved Quick Look preview rendering and shared app/extension resources.

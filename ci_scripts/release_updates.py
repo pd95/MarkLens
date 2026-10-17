@@ -39,12 +39,43 @@ class APIError(ReleaseError):
         super().__init__(f"GitHub {operation} failed with HTTP {status}")
 
 
+class ToolError(ReleaseError):
+    def __init__(self, tool, result):
+        super().__init__(f"{tool} failed (exit {result.returncode})")
+        # Keep raw diagnostics out of the exception message and redact before logging.
+        self.output = (result.stdout or "") + "\n" + (result.stderr or "")
+
+
+def redacted_diagnostics(output, environment):
+    output = re.sub(r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z0-9 ]*PRIVATE KEY-----|$)",
+                    "[REDACTED PRIVATE KEY]", output)
+    secrets = set()
+    for name, value in environment.items():
+        if value and any(word in name.upper() for word in ("KEY", "TOKEN", "PASSWORD", "SECRET", "ISSUER")):
+            secrets.add(value)
+            secrets.add(json.dumps(value)[1:-1])
+            secrets.update(line.strip() for line in value.splitlines() if line.strip())
+            if "PRIVATE_KEY" in name:
+                secrets.add("".join(line.strip() for line in value.splitlines() if not line.startswith("-----")))
+    for value in sorted(filter(None, secrets), key=len, reverse=True):
+        output = output.replace(value, "[REDACTED]")
+    output = re.sub(r"(?i)(Bearer\s+)[A-Za-z0-9._~+/-]+=*", r"\1[REDACTED]", output)
+    # Redact before limiting output so a secret cut at the boundary cannot leak.
+    return output.strip()[-20000:]
+
+
+def report_tool_failure(error, environment):
+    if isinstance(error, ToolError):
+        details = redacted_diagnostics(error.output, environment)
+        if details:
+            print("Tool diagnostics (secrets redacted):\n" + details, file=sys.stderr, flush=True)
+
+
 def run(arguments, *, secret=None):
     result = subprocess.run([str(a) for a in arguments], input=secret, text=True,
                             stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     if result.returncode:
-        # Do not echo tool output: malformed secrets can be repeated by tools.
-        raise ReleaseError(f"{Path(arguments[0]).name} failed (exit {result.returncode})")
+        raise ToolError(Path(arguments[0]).name, result)
     return result.stdout
 
 
@@ -344,7 +375,8 @@ def exported_app(environment):
                      "-allowProvisioningUpdates", "-authenticationKeyPath", key_file,
                      "-authenticationKeyID", key_id, "-authenticationKeyIssuerID", issuer_id])
             except ReleaseError as error:
-                raise ReleaseError("Developer ID export failed; verify the API key has access to signing assets and cloud-managed Developer ID certificates") from error
+                report_tool_failure(error, environment)
+                raise ReleaseError("Developer ID export failed; see the redacted Xcode diagnostics above") from error
         yield app_in_export(destination)
 
 
@@ -378,8 +410,12 @@ def notarize_app(app, environment):
 
 
 def publish(environment=os.environ):
-    with ExitStack() as resources:
-        _publish(environment, resources)
+    try:
+        with ExitStack() as resources:
+            _publish(environment, resources)
+    except ToolError as error:
+        report_tool_failure(error, environment)
+        raise
 
 
 def _publish(environment, resources):

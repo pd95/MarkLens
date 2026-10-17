@@ -6,6 +6,19 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXAggregateTarget section */
+		A41000000000000000000001 /* Publish */ = {
+			isa = PBXAggregateTarget;
+			buildConfigurationList = A41000000000000000000002 /* Build configuration list for PBXAggregateTarget "Publish" */;
+			buildPhases = (
+				A41000000000000000000005 /* Publish notarized release */,
+			);
+			dependencies = ();
+			name = Publish;
+			productName = Publish;
+		};
+/* End PBXAggregateTarget section */
+
 /* Begin PBXBuildFile section */
 		A31000000000000000000001 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = A31000000000000000000003 /* Sparkle */; platformFilters = (macos, ); };
 		17A70A872F0AB78300D93FE9 /* MarkdownPipeline in Frameworks */ = {isa = PBXBuildFile; productRef = 17A70A852F0AB78300D93FE9 /* MarkdownPipeline */; };
@@ -383,6 +396,7 @@
 			projectRoot = "";
 			targets = (
 				17FBBD7C2F0831EC00BEAA3E /* MarkLens */,
+				A41000000000000000000001 /* Publish */,
 				17CD184A2F08337100899189 /* QuickLookPreview_macOS */,
 				178AADE22FB9D6A10086D069 /* MarkLensUITests */,
 				A10000012FC0000000000004 /* MarkLensTests */,
@@ -421,6 +435,22 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		A41000000000000000000005 /* Publish notarized release */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = ();
+			inputPaths = ();
+			name = "Publish notarized release";
+			outputPaths = ();
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/zsh;
+			shellScript = "exec \"$SRCROOT/ci_scripts/run_publish.sh\"\n";
+			showEnvVarsInLog = 0;
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		178AADDF2FB9D6A10086D069 /* Sources */ = {
@@ -475,6 +505,26 @@
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
+		A41000000000000000000003 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGNING_ALLOWED = NO;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				SDKROOT = macosx;
+				SUPPORTED_PLATFORMS = macosx;
+			};
+			name = Debug;
+		};
+		A41000000000000000000004 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGNING_ALLOWED = NO;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				SDKROOT = macosx;
+				SUPPORTED_PLATFORMS = macosx;
+			};
+			name = Release;
+		};
 		178AADEC2FB9D6A10086D069 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -888,6 +938,15 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		A41000000000000000000002 /* Build configuration list for PBXAggregateTarget "Publish" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A41000000000000000000003 /* Debug */,
+				A41000000000000000000004 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 		178AADEB2FB9D6A10086D069 /* Build configuration list for PBXNativeTarget "MarkLensUITests" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (

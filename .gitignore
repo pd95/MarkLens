@@ -16,3 +16,6 @@ inspiration/
 tests/
 !ci_scripts/tests/
 !ci_scripts/tests/test_ci_pre_xcodebuild.sh
+
+# Python release-tool caches
+__pycache__/

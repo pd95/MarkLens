@@ -1,6 +1,15 @@
 #!/bin/zsh
 set -euo pipefail
 
+if [[ "${CI_XCODE_SCHEME:-}" == "Publish" ]]; then
+    if [[ "${CI_XCODEBUILD_ACTION:-}" != "build" ]]; then
+        echo "error: The Publish workflow requires a Build action." >&2
+        exit 1
+    fi
+    echo "Publish scheme: leaving app sources and version settings unchanged."
+    exit 0
+fi
+
 SCRIPT_DIR="${0:A:h}"
 REPOSITORY_ROOT="${SCRIPT_DIR:h}"
 PROJECT_FILE="${PROJECT_FILE:-$REPOSITORY_ROOT/MarkLens.xcodeproj/project.pbxproj}"

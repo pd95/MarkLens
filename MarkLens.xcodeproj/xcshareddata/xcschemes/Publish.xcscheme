@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Scheme LastUpgradeVersion="2640" version="1.7">
+   <BuildAction parallelizeBuildables="NO" buildImplicitDependencies="NO">
+      <BuildActionEntries>
+         <BuildActionEntry buildForTesting="NO" buildForRunning="YES" buildForProfiling="NO" buildForArchiving="NO" buildForAnalyzing="NO">
+            <BuildableReference BuildableIdentifier="primary" BlueprintIdentifier="A41000000000000000000001" BuildableName="Publish" BlueprintName="Publish" ReferencedContainer="container:MarkLens.xcodeproj"/>
+         </BuildActionEntry>
+         <!-- Associate this scheme with the existing Cloud product. Build never compiles this entry. -->
+         <BuildActionEntry buildForTesting="NO" buildForRunning="NO" buildForProfiling="NO" buildForArchiving="YES" buildForAnalyzing="NO">
+            <BuildableReference BuildableIdentifier="primary" BlueprintIdentifier="17FBBD7C2F0831EC00BEAA3E" BuildableName="MarkLens.app" BlueprintName="MarkLens" ReferencedContainer="container:MarkLens.xcodeproj"/>
+         </BuildActionEntry>
+      </BuildActionEntries>
+   </BuildAction>
+   <LaunchAction buildConfiguration="Release" selectedDebuggerIdentifier="" selectedLauncherIdentifier="Xcode.IDEFoundation.Launcher.PosixSpawn" launchStyle="0" useCustomWorkingDirectory="NO" ignoresPersistentStateOnLaunch="NO" debugDocumentVersioning="YES"/>
+   <ArchiveAction buildConfiguration="Release" revealArchiveInOrganizer="NO"/>
+</Scheme>

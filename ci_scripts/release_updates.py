@@ -6,6 +6,7 @@ in command arguments or git remote URLs. Git's ref update provides the compare-
 and-swap boundary for concurrent feed publications.
 """
 import base64
+from contextlib import contextmanager, ExitStack
 import hashlib
 import json
 import os
@@ -289,6 +290,66 @@ def generate_feed(directory, tools, secret, snapshot, archive, build, tag, url, 
     return feed.read_bytes()
 
 
+@contextmanager
+def apple_api_key(environment):
+    private_key = environment.get("APP_STORE_CONNECT_API_PRIVATE_KEY")
+    key_id = environment.get("APP_STORE_CONNECT_API_KEY_ID")
+    issuer_id = environment.get("APP_STORE_CONNECT_API_ISSUER_ID")
+    if not all((private_key, key_id, issuer_id)):
+        raise ReleaseError("Configure all three APP_STORE_CONNECT_API_* variables in Xcode Cloud for export and notarization")
+    with tempfile.TemporaryDirectory(prefix="marklens-apple-auth-") as temporary:
+        key_file = Path(temporary) / "AuthKey.p8"
+        descriptor = os.open(key_file, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(descriptor, "w") as file:
+            file.write(private_key.strip() + "\n")
+        yield key_file, key_id, issuer_id
+
+
+def app_in_export(path):
+    if path.suffix == ".app" and path.is_dir():
+        return path
+    matches = list(path.glob("*.app")) if path.is_dir() else []
+    if len(matches) != 1:
+        raise ReleaseError("Developer ID export must contain exactly one app bundle")
+    return matches[0]
+
+
+@contextmanager
+def exported_app(environment):
+    configured = environment.get("CI_DEVELOPER_ID_SIGNED_APP_PATH", "")
+    if configured:
+        path = Path(configured)
+        if path.is_dir() and (path.suffix == ".app" or list(path.glob("*.app"))):
+            yield app_in_export(path)
+            return
+    # With Deployment Preparation=None and no Cloud Notarize post-action,
+    # Cloud may provide only the archive, rather than a Developer ID export.
+    archive = environment.get("CI_ARCHIVE_PATH", "")
+    if not archive or not Path(archive).is_dir():
+        raise ReleaseError("No Developer ID export or CI_ARCHIVE_PATH is available; this release requires a macOS Archive action")
+    team = environment.get("CI_TEAM_ID", "")
+    if not re.fullmatch(r"[A-Z0-9]{10}", team):
+        raise ReleaseError("Missing or invalid CI_TEAM_ID for Developer ID export")
+    with tempfile.TemporaryDirectory(prefix="marklens-export-") as temporary:
+        directory = Path(temporary)
+        options = directory / "ExportOptions.plist"
+        options.write_bytes(plistlib.dumps({
+            "method": "developer-id", "destination": "export", "signingStyle": "automatic",
+            "teamID": team, "manageAppVersionAndBuildNumber": False,
+        }))
+        destination = directory / "app"
+        print("Exporting the archive with Developer ID signing before notarization.", flush=True)
+        with apple_api_key(environment) as (key_file, key_id, issuer_id):
+            try:
+                run(["xcodebuild", "-exportArchive", "-archivePath", archive,
+                     "-exportOptionsPlist", options, "-exportPath", destination,
+                     "-allowProvisioningUpdates", "-authenticationKeyPath", key_file,
+                     "-authenticationKeyID", key_id, "-authenticationKeyIssuerID", issuer_id])
+            except ReleaseError as error:
+                raise ReleaseError("Developer ID export failed; verify the API key has access to signing assets and cloud-managed Developer ID certificates") from error
+        yield app_in_export(destination)
+
+
 def notarize_app(app, environment):
     """Replace the Cloud Notarize post-action with one synchronous submission."""
     try:
@@ -296,21 +357,9 @@ def notarize_app(app, environment):
         return
     except ReleaseError:
         pass
-    private_key = environment.get("APP_STORE_CONNECT_API_PRIVATE_KEY")
-    key_id = environment.get("APP_STORE_CONNECT_API_KEY_ID")
-    issuer_id = environment.get("APP_STORE_CONNECT_API_ISSUER_ID")
-    if not all((private_key, key_id, issuer_id)):
-        raise ReleaseError(
-            "Configure these Xcode Cloud variables for scripted notarization: "
-            "APP_STORE_CONNECT_API_PRIVATE_KEY (secret), APP_STORE_CONNECT_API_KEY_ID and APP_STORE_CONNECT_API_ISSUER_ID "
-            "to notarize before publishing."
-        )
-    with tempfile.TemporaryDirectory(prefix="marklens-notarization-") as temporary:
+    with tempfile.TemporaryDirectory(prefix="marklens-notarization-") as temporary, apple_api_key(environment) as credentials:
         directory = Path(temporary)
-        key_file = directory / "AuthKey.p8"
-        descriptor = os.open(key_file, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-        with os.fdopen(descriptor, "w") as file:
-            file.write(private_key.strip() + "\n")
+        key_file, key_id, issuer_id = credentials
         print("Submitting the signed app for notarization; waiting up to 20 minutes for Apple.", flush=True)
         submission = directory / "MarkLens-notarization.zip"
         run(["ditto", "-c", "-k", "--keepParent", app, submission])
@@ -331,6 +380,11 @@ def notarize_app(app, environment):
 
 
 def publish(environment=os.environ):
+    with ExitStack() as resources:
+        _publish(environment, resources)
+
+
+def _publish(environment, resources):
     tag = environment.get("CI_TAG", "").removeprefix("refs/tags/")
     if (environment.get("CI_XCODEBUILD_ACTION") != "archive"
             or environment.get("CI_XCODEBUILD_EXIT_CODE", "1") != "0"
@@ -347,8 +401,7 @@ def publish(environment=os.environ):
     if not token or not secret:
         raise ReleaseError("GITHUB_RELEASE_TOKEN and SPARKLE_PRIVATE_KEY must be configured as Xcode Cloud secrets")
     tools = find_sparkle_tools(environment)
-    artifact = Path(environment.get("CI_DEVELOPER_ID_SIGNED_APP_PATH", "/nonexistent"))
-    app = artifact if artifact.suffix == ".app" else artifact / "MarkLens.app"
+    app = resources.enter_context(exported_app(environment))
     try:
         info = plistlib.loads((app / "Contents/Info.plist").read_bytes())
     except (OSError, plistlib.InvalidFileException) as error:

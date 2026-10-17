@@ -100,7 +100,8 @@ See `THIRD_PARTY_NOTICES`.
 ## Publishing macOS updates
 
 Release archives are built and Developer ID signed by Xcode Cloud. Starting with
-1.10.0, `ci_post_xcodebuild.sh` notarizes the exported app, waits for Apple's
+1.10.0, `ci_post_xcodebuild.sh` exports the archive with Developer ID signing,
+notarizes the exported app, waits for Apple's
 acceptance, staples the ticket, signs the update ZIP with Sparkle, and publishes
 the release and cumulative appcast to GitHub. GitHub hosts the release assets and
 serves the feed from `gh-pages`; no GitHub Actions publishing job is required.
@@ -134,15 +135,20 @@ Only macOS builds embed Sparkle; Quick Look and mobile builds do not run an upda
 4. Obtain the Apple key in **App Store Connect → Users and Access → Integrations
    → App Store Connect API → Team Keys**. Generate a team key with **Developer**
    access, download its `.p8` file, and copy the Key ID and Issuer ID from that
-   page. Apple permits downloading the private key only once; keep a secure
-   backup. See [Apple's key setup instructions](https://developer.apple.com/documentation/appstoreconnectapi/creating-api-keys-for-app-store-connect-api).
+   page. The key also authenticates the Developer ID export, so it needs access
+   to signing assets and cloud-managed Developer ID certificates. Apple permits
+   downloading the private key only once; keep a secure backup. See [Apple's key setup instructions](https://developer.apple.com/documentation/appstoreconnectapi/creating-api-keys-for-app-store-connect-api).
    If you already created this key for artifact retrieval, reuse the same values
    in the Cloud variables above. No Apple or Sparkle credentials are needed in
    GitHub Actions for this pipeline; remove those repository secrets if they
    were added solely for the previous publishing workflow.
 5. **Disable the built-in Notarize – macOS post-action** in the Cloud Release
-   workflow. Keep the Archive action configured to export a **Developer ID**
-   signed macOS app. The script replaces the post-action: it submits once using
+   workflow. Keep the Archive action’s **Deployment Preparation** set to
+   **None / Ohne**. The script explicitly exports `CI_ARCHIVE_PATH` using
+   `xcodebuild -exportArchive`, automatic Developer ID signing, Cloud’s
+   `CI_TEAM_ID`, and the Apple API credentials above. If Cloud already supplies
+   a Developer ID export, the script reuses it. The original archive is never
+   uploaded directly. The script then submits once using
    `notarytool --wait`, checks for `Accepted`, staples the ticket, and verifies
    Gatekeeper acceptance before packaging the final Sparkle update ZIP.
    An already-stapled export skips submission. A rejection, timeout, or validation
